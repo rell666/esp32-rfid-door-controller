@@ -38,7 +38,7 @@ Also needed (not in the list above):
 | 12 V DC supply, fused separately for the controller/readers and each lock | Powers board, readers and locks. |
 | Lock (maglock or strike), 1N4007 flyback diode across each DC lock coil | Fitted at the lock. |
 | Normally-open exit button per door (pin → GND, **never 5 V**) | GPIO13 for door 1. |
-| Fire-alarm relay and green break-glass unit in the maglock's power | **A maglock must release without the controller.** |
+| Fire-alarm relay in the maglock's power | **A maglock must release without the controller.** |
 | USB-serial adapter with 3.3 V logic (CP2102 / FT232R) | First flash only; later updates are over Wi-Fi. |
 | Optional: DS3231 RTC module | Keeps the time with no internet (SDA 21, SCL 22). |
 
@@ -107,7 +107,7 @@ After changing anything under `src/websrc`, rebuild the web UI: `cd tools/webfil
 
 ## Safety and security
 
-- **A maglock is fail-released only if wired that way, and must have an emergency release that does not depend on this controller** (fire-alarm relay + break-glass). Get the door's fire safety signed off.
+- **A maglock is fail-released only if wired that way, and must have an emergency release that does not depend on this controller** (a fire-alarm relay). Get the door's fire safety signed off.
 - Card UIDs can be cloned; there is no TLS on the web UI or MQTT; firmware is not signed and flash is not encrypted. Keep it on a trusted network. The full list is in [README-IRONFRAME.md § Residual risks](README-IRONFRAME.md#residual-risks-not-fixed-know-these-before-deploying).
 
 ## Documents
