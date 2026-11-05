@@ -3,7 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## Ironframe 1.9.1 - 2026-10-26
 
-Updates from 1.9.0 (or earlier 1.x) through Update with `ironframe-rfid-1.9.1.bin` (`bin/esp32wroom.bin` when built from source; the partition layout is unchanged; no serial flash, settings and users are kept). From review 8. Bench checks owed: ledger H31 (none run yet on this release). Not yet checked on a door.
+Updates from 1.9.0 (or earlier 1.x) through Update with `ironframe-rfid-1.9.1.bin` (`bin/esp32wroom.bin` when built from source; the partition layout is unchanged; no serial flash, settings and users are kept). From review 8. Reported working on the VOANZO board (2026-11-05); the itemised bench checks are still owed (ledger H31). Not yet checked on a door.
 
 **Behaviour changes:**
 - **The admin password is needed for what opens a door, enrols a credential or erases the record**, not only a signed-in page (the session token travels in the plain-HTTP WebSocket URL): Test, Restart, removing a user, a user save that adds a user, gives admin access or sets, changes or removes a PIN (a name, the dates or roles Always/Disabled on a stored user still need only the session), a backup restore, clearing a log, logging on or off, moving a clock that is already set (a lost clock is still set from the browser), and any change on Doors & Readers. The page keeps the password's hash after sign-in and asks after a reload (review 8 V1).

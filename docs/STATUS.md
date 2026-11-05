@@ -4,17 +4,18 @@
 
 ## Proven on real hardware
 
-- It boots on a VOANZO ESP32-WROOM-32E 2-relay board and on an ESP32 DevKit, and the web UI works.
+- It boots on the [VOANZO ESP32-WROOM-32E 2-relay board](https://www.amazon.co.uk/dp/B0DS6SB1XB) and on an ESP32 DevKit, and the web UI works.
+- 1.9.1 was run on the VOANZO board and reported working well (2026-11-05). That report does not list individual checks, so the list below still stands.
 - Both relays click on Test.
 - Reader 1 reads cards, and both readers were later reported working.
 - An exit button on GPIO13 opens the door.
-- Updates over Wi-Fi install, up to 1.7.0 on the VOANZO board. The changes in 1.8.1 and 1.9.0 were checked on a second ESP32 on the bench.
+- Updates over Wi-Fi install on the VOANZO board (checked up to 1.7.0). The changes in 1.8.1 and 1.9.0 were checked on a second ESP32 on the bench.
 
 ## Not yet proven on real hardware
 
 - The Wi-Fi fallback, a real lock and the door contacts.
 - Most of the door behaviour added in 1.1 and 1.2.
-- 1.9.1, the current release: no board check has been run on it yet. It passes the software gates listed in [CONTRIBUTING.md](../CONTRIBUTING.md).
+- The itemised bench checks for 1.9.1, the current release. It passes the software gates listed in [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Reading the history
 
