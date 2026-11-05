@@ -153,18 +153,16 @@ text(290, 205, "controller + readers", 11, fill="#555")
 wire([(214, 215), (232, 215), (232, 232)], BLK)
 ground(232, 232)
 
-# lock supply chain, all in series: F2, fire-alarm contact, break-glass
+# lock supply chain, all in series: F2, fire-alarm contact
 wire([(250, 175), (250, 340), (270, 340)], RED)
 fuse(270, 340, "")
 text(292, 372, "F2 (locks)", 12, "middle", "bold")
 wire([(314, 340), (355, 340)], RED)
 contact_nc(355, 340, "Fire-alarm relay", "opens on alarm")
-wire([(415, 340), (455, 340)], RED)
-contact_nc(455, 340, "Break-glass", "green, NC")
-wire([(515, 340), (525, 340)], RED)
+wire([(415, 340), (525, 340)], RED)
 flag(525, 340, "+12V LOCKS", RED)
-text(60, 412, "The maglock supply goes through the fire-alarm relay and the", 12, fill="#333")
-text(60, 430, "break-glass unit, so the doors release whatever the controller does.", 12, fill="#333")
+text(60, 412, "The maglock supply goes through the fire-alarm relay,", 12, fill="#333")
+text(60, 430, "so the doors release on alarm whatever the controller does.", 12, fill="#333")
 
 # ---------------------------------------------------------------- relay board
 BX, BY, BW, BH = 640, 110, 440, 460
