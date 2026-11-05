@@ -1,0 +1,270 @@
+#define USERS_PER_PAGE 50
+#define USERLIST_DOC_BYTES 16384
+#define USERLIST_TOO_LARGE "The user list page is too large to send; shorten some names"
+
+// Sends one page of users. Upstream sent 10 per page and the browser fetches
+// every page before drawing the table, so a 300-user install took 30 round
+// trips; 50 per page cuts that to 6. Only users on the requested page are
+// opened and parsed. PINs are not sent, only whether a user has one
+// (haspin), except for Backup Users (withPins): the page has no use for them,
+// and anyone watching the link or the browser saw every PIN.
+// keys as const char *: ArduinoJson keeps the pointer instead of copying a
+// String into the capped document (about 1.7 KB of a 50-user page)
+static const char *const ACCTYPE_KEYS[] = {"acctype", "acctype2", "acctype3", "acctype4"};
+static_assert(MAX_NUM_RELAYS <= 4, "ACCTYPE_KEYS names four relays");
+
+void sendUserList(int page, uint32_t clientId, bool withPins)
+{
+	if (page < 1)
+		page = 1;
+	DynamicJsonDocument root(USERLIST_DOC_BYTES);
+	root["command"] = "userlist";
+	root["page"] = page;
+	root["haspages"] = 0;
+	JsonArray users = root.createNestedArray("list");
+	// the page comes from the browser: (page - 1) * 50 in int overflowed for a
+	// huge one (undefined behaviour; review 8 V19). 64-bit, as sendFileList:
+	// a page past the end answers an empty list and the real haspages.
+	uint64_t first = (uint64_t)(page - 1) * USERS_PER_PAGE;
+	uint64_t last = (uint64_t)page * USERS_PER_PAGE;
+	int i = 0;
+	if (userIndex.ready())
+	{
+		// from RAM (core/userindex.h): opening the page's 50 files held up
+		// cards and exit buttons for up to 11 s (review 7 V1)
+		for (uint64_t k = first; k < userIndex.size() && k < last; k++)
+		{
+			const core::UserEntry &e = userIndex.at(k);
+			JsonObject item = users.createNestedObject();
+			item["uid"] = e.uid;
+			item["username"] = e.name;
+			for (int x = 1; x <= MAX_NUM_RELAYS; x++)
+				item[ACCTYPE_KEYS[x - 1]] = e.acctype[x - 1];
+			item["validsince"] = e.validSince;
+			item["validuntil"] = e.validUntil;
+			item["haspin"] = !e.pin.empty();
+			if (withPins)
+				item["pincode"] = e.pin;
+		}
+		i = (int)userIndex.size();
+	}
+	File dir = userIndex.ready() ? File() : LittleFS.open("/P");
+	if (dir && dir.isDirectory())
+	{
+		// names only (storage.esp nextFileName), then open just this page's users
+		std::vector<String> pageUids;
+		String name;
+		bool isDir = false;
+		while (nextFileName(dir, name, isDir))
+		{
+			if (!isDir && core::isValidUid(name.c_str()))
+			{
+				if ((uint64_t)i >= first && (uint64_t)i < last)
+					pageUids.push_back(name);
+				i++;
+			}
+			esp_task_wdt_reset();
+			if ((i & 31) == 0)
+				yield();
+		}
+		dir.close();
+		for (const String &uid : pageUids)
+		{
+			File f = LittleFS.open("/P/" + uid, "r");
+			esp_task_wdt_reset(); // each open scans the directory
+			if (!f)
+				continue;
+			JsonObject item = users.createNestedObject();
+			item["uid"] = uid;
+			DynamicJsonDocument json(1024);
+			auto error = deserializeJson(json, f);
+			if (!error)
+			{
+				item["username"] = json["user"].as<String>();
+				for (int x = 1; x <= MAX_NUM_RELAYS; x++)
+					item[ACCTYPE_KEYS[x - 1]] = core::recordRole(json[ACCTYPE_KEYS[x - 1]]);
+				item["validsince"] = json.containsKey("validsince") ? json["validsince"].as<unsigned long>() : 0;
+				item["validuntil"] = json["validuntil"].as<unsigned long>();
+				const char *pin = json["pincode"] | "";
+				item["haspin"] = *pin != '\0';
+				if (withPins)
+					item["pincode"] = String(pin);
+			}
+			f.close();
+		}
+	}
+	root["haspages"] = (i + USERS_PER_PAGE - 1) / USERS_PER_PAGE;
+	if (root.overflowed())
+	{
+		// said why: a bare false left the page waiting 45 s, then blaming the
+		// device (review 8 V16)
+		wsSendText(clientId, "{\"command\":\"result\",\"resultof\":\"userlist\",\"result\":false,\"message\":\"" USERLIST_TOO_LARGE "\"}");
+		return;
+	}
+	wsSendJson(clientId, root);
+	wsSendText(clientId, "{\"command\":\"result\",\"resultof\":\"userlist\",\"result\": true}");
+}
+
+bool wiegandCounters(int port, core::WiegandCounters &out); // wiegand.esp
+void statusDoors(JsonArray out);                             // door.esp
+
+void sendStatus(uint32_t clientId)
+{
+	// the doors and the last card since 1.9 (were 1600); 3072 since 1.9.1:
+	// 2560 was a few hundred bytes from a four-door ESP32-S3 worst case, and
+	// a full document drops its last members silently, which were the
+	// network fields (review 8 V16). They come first now.
+	DynamicJsonDocument root(3072);
+	root["command"] = "status";
+	if (config.accessPointMode || fallbackApUp)
+	{
+		root["ssid"] = WiFi.softAPSSID();
+		root["dns"] = WiFi.softAPIP().toString();
+		root["mac"] = WiFi.softAPmacAddress();
+		root["ip"] = WiFi.softAPIP().toString();
+		root["gateway"] = WiFi.softAPIP().toString();
+		root["netmask"] = WiFi.softAPSubnetMask().toString();
+	}
+	else
+	{
+		root["ssid"] = WiFi.SSID();
+		root["dns"] = WiFi.dnsIP().toString();
+		root["mac"] = WiFi.macAddress();
+		root["ip"] = WiFi.localIP().toString();
+		root["gateway"] = WiFi.gatewayIP().toString();
+		root["netmask"] = WiFi.subnetMask().toString();
+	}
+	root["heap"] = ESP.getFreeHeap();
+	root["heaptotal"] = ESP.getHeapSize(); // scales the Status heap bar for this chip
+	// for spotting a slow leak or fragmentation over weeks (see logMemory())
+	root["heapmaxalloc"] = ESP.getMaxAllocHeap();
+	root["heapmin"] = ESP.getMinFreeHeap();
+	root["chipid"] = String((uint32_t)(ESP.getEfuseMac() >> 24), HEX);
+	root["chipmodel"] = ESP.getChipModel();
+	root["cpu"] = ESP.getCpuFreqMHz();
+	root["psram"] = ESP.getPsramSize();
+	root["sketchsize"] = ESP.getSketchSize();
+	root["availsize"] = ESP.getFreeSketchSpace();
+	root["availspiffs"] = fsFreeBytes(); // log.esp: the estimate, at most 30 s old (a full walk took 2 s with 700 users)
+	root["spiffssize"] = fsTotalBytes();
+
+	int h = uptimeSeconds / 3600;
+	int rem = uptimeSeconds % 3600;
+	int m = rem / 60;
+	int s = rem % 60;
+	char uptimebuffer[16];
+	snprintf(uptimebuffer, sizeof(uptimebuffer), "%02d:%02d:%02d", h, m, s);
+	root["uptime"] = uptimebuffer;
+
+	root["version"] = VERSION;
+	root["hostname"] = WiFi.getHostname();
+	root["defaultpassword"] = config.adminMustChange;
+	root["timetrusted"] = deviceClock.trusted; // false: dated and opening-hours users are refused
+	// what an owner looks for first (plan 1.9 C3): set up or not, the doors,
+	// the last card
+	root["configured"] = deviceConfigured && !configDamaged;
+	statusDoors(root.createNestedArray("doors"));
+	if (lastAccess.any)
+	{
+		JsonObject last = root.createNestedObject("lastaccess");
+		last["uid"] = lastAccess.uid;
+		last["name"] = lastAccess.name;
+		last["door"] = lastAccess.door;
+		last["granted"] = lastAccess.access == ACCESS_GRANTED;
+		last["time"] = lastAccess.time;
+	}
+	rtcStatus(root.createNestedObject("rtc")); // the RTC module: off | ok | lost | missing
+	root["apopen"] = apOpen;           // the hotspot has no password
+	root["resetreason"] = resetReason; // why the board last restarted
+	root["crashdump"] = crashDumpPresent;
+#if CONFIG_IDF_TARGET_ESP32S3
+	root["chip"] = "esp32s3";
+#else
+	root["chip"] = "esp32";
+#endif
+	// the hardware page builds its pin menus from these (core/pins.h)
+	core::PinSet ps = boardPins();
+	JsonArray io = root.createNestedArray("pinsio");
+	for (size_t i = 0; i < ps.ioN; i++)
+		io.add(ps.io[i]);
+	JsonArray inOnly = root.createNestedArray("pinsinput");
+	for (size_t i = 0; i < ps.inOnlyN; i++)
+		inOnly.add(ps.inOnly[i]);
+	// what each Wiegand reader has thrown away since start-up: rising counts
+	// mean noisy wiring, which otherwise only shows as cards that do not read
+	JsonArray wg = root.createNestedArray("wiegand");
+	for (int i = 0; i < MAX_READERS; i++)
+	{
+		core::WiegandCounters c;
+		if (!wiegandCounters(i, c))
+			continue;
+		JsonObject o = wg.createNestedObject();
+		o["reader"] = i + 1;
+		if (config.readers[i].door == -2)
+			o["nodoor"] = true; // bound to a door that does not exist: refuses every card
+		o["glitches"] = c.glitches;
+		o["badframes"] = c.badFrames;
+		o["parity"] = c.parity;
+		o["overruns"] = c.overruns;
+	}
+
+	wsSendJson(clientId, root);
+}
+
+void printScanResult(int networksFound)
+{
+	// sort by RSSI
+	int n = networksFound;
+	std::vector<int> indices(n);
+	for (int i = 0; i < n; i++)
+	{
+		indices[i] = i;
+	}
+	std::sort(indices.begin(), indices.end(), [](int a, int b) { return WiFi.RSSI(a) > WiFi.RSSI(b); });
+	DynamicJsonDocument root(2048);
+	root["command"] = "ssidlist";
+	JsonArray scan = root.createNestedArray("list");
+	for (int i = 0; i < 10 && i < n; ++i)
+	{
+		JsonObject item = scan.createNestedObject();
+		item["ssid"] = WiFi.SSID(indices[i]);
+		item["bssid"] = WiFi.BSSIDstr(indices[i]);
+		item["rssi"] = WiFi.RSSI(indices[i]);
+		item["channel"] = WiFi.channel(indices[i]);
+		item["enctype"] = (int)WiFi.encryptionType(indices[i]);
+		item["hidden"] = WiFi.SSID(indices[i]).length() == 0;
+	}
+	wsSendJson(0, root);
+	WiFi.scanDelete();
+}
+
+// ESP32 has no scanNetworksAsync(callback); start an async scan when the UI
+// asks for one and poll for completion from loop().
+void processWifiScan()
+{
+	static bool scanning = false;
+	if (wifiScanRequested && !scanning)
+	{
+		wifiScanRequested = false;
+		if (WiFi.getMode() == WIFI_AP)
+			WiFi.mode(WIFI_AP_STA); // scanning needs the STA interface
+		WiFi.scanNetworks(true, true);
+		scanning = true;
+		return;
+	}
+	if (!scanning)
+		return;
+	int16_t result = WiFi.scanComplete();
+	if (result == WIFI_SCAN_RUNNING)
+		return;
+	scanning = false;
+	printScanResult(result > 0 ? result : 0);
+}
+
+void sendTime(uint32_t clientId)
+{
+	DynamicJsonDocument root(256);
+	root["command"] = "gettime";
+	root["epoch"] = deviceClock.epoch;
+	wsSendJson(clientId, root);
+}

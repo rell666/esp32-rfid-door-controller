@@ -1,0 +1,929 @@
+// Largest WebSocket message accepted (a full config.json or one user record
+// fits easily). Anything bigger is discarded while it is still arriving.
+#define MAX_WS_MESSAGE 16384
+#define WS_QUEUE_MAX 16
+#define WS_QUEUE_SLICE_MS 100 // time processWsQueue() may spend per loop() pass
+// All WebSocket messages together, being assembled or queued (core::ByteBudget).
+#define WS_BYTES_MAX 40960
+#define CONFIG_DOC_BYTES 8192
+#define USER_LIMIT_MESSAGE "The user limit (200) is reached: delete a user you no longer need first."
+static_assert(core::MAX_USERS == 200, "USER_LIMIT_MESSAGE names the limit");
+#define USER_STORAGE_FULL_MESSAGE "Storage is nearly full: no more users can be added. Delete users you no longer need, or clear the logs."
+
+static core::ByteBudget wsBudget(WS_BYTES_MAX);
+
+struct WsClientState
+{
+	core::MessageAssembler assembler{MAX_WS_MESSAGE, &wsBudget};
+	uint64_t connectedAt = 0;
+};
+
+// Open sockets: when each connected, and the session token it connected with
+// (logout closes every socket of that token, not just the caller's).
+// lastHeard / lastPing: core::wsAlive (a page that left without closing).
+// ip: the client's address at connect, for the event log; read here rather
+// than through ws.client(id), whose pointer the library's disconnect can
+// free on the TCP task once its lock is released (review 8 V13).
+struct WsAgeSlot { uint32_t id = 0; uint64_t connectedAt = 0; uint64_t lastHeard = 0; uint64_t lastPing = 0; uint32_t ip = 0; char token[core::SessionStore::TOKEN_HEX + 1] = {0}; };
+static WsAgeSlot wsAgeSlots[16];
+static std::mutex wsAgeMutex;
+
+static bool trackWsClient(uint32_t id, uint64_t connectedAt, const char *token, uint32_t ip)
+{
+	std::lock_guard<std::mutex> lock(wsAgeMutex);
+	for (WsAgeSlot &slot : wsAgeSlots)
+	{
+		if (slot.id == 0)
+		{
+			slot.id = id;
+			slot.connectedAt = connectedAt;
+			slot.lastHeard = connectedAt;
+			slot.lastPing = 0;
+			slot.ip = ip;
+			core::setTextCut(slot.token, token);
+			return true;
+		}
+	}
+	return false;
+}
+
+// The sockets opened with token (a validated, full-length token).
+static size_t wsClientsOfToken(const char *token, uint32_t *ids, size_t max)
+{
+	size_t count = 0;
+	if (strlen(token) != core::SessionStore::TOKEN_HEX)
+		return 0;
+	std::lock_guard<std::mutex> lock(wsAgeMutex);
+	for (WsAgeSlot &slot : wsAgeSlots)
+		if (slot.id != 0 && count < max && strcmp(slot.token, token) == 0)
+			ids[count++] = slot.id;
+	return count;
+}
+
+// The session token socket id connected with ("" if not tracked).
+static String wsTokenOf(uint32_t id)
+{
+	std::lock_guard<std::mutex> lock(wsAgeMutex);
+	for (WsAgeSlot &slot : wsAgeSlots)
+		if (slot.id == id)
+			return String(slot.token);
+	return String();
+}
+
+// The address socket id connected from ("?" if not tracked).
+static String wsAddressOf(uint32_t id)
+{
+	uint32_t ip = 0;
+	{
+		std::lock_guard<std::mutex> lock(wsAgeMutex);
+		for (WsAgeSlot &slot : wsAgeSlots)
+			if (slot.id == id)
+				ip = slot.ip;
+	}
+	return ip ? IPAddress(ip).toString() : String("?");
+}
+
+// Socket id sent something (a message chunk or a pong): it is still there.
+static void heardWsClient(uint32_t id)
+{
+	uint64_t now = uptimeMs();
+	std::lock_guard<std::mutex> lock(wsAgeMutex);
+	for (WsAgeSlot &slot : wsAgeSlots)
+		if (slot.id == id) { slot.lastHeard = now; return; }
+}
+
+// Socket id sent a message: its session was used now. Tokens were refreshed
+// only at the upgrade and /session, and a socket closed 12 h after it
+// connected, so "12 h unused" was really "12 h after connecting" and the
+// 24 h cap was never reached (review 8 V20). Never with authMutex held.
+static void usedWsClient(uint32_t id)
+{
+	char token[core::SessionStore::TOKEN_HEX + 1] = {0};
+	{
+		std::lock_guard<std::mutex> lock(wsAgeMutex);
+		for (WsAgeSlot &slot : wsAgeSlots)
+			if (slot.id == id)
+				memcpy(token, slot.token, sizeof(token));
+	}
+	if (token[0] == '\0')
+		return;
+	std::lock_guard<std::mutex> lock(authMutex);
+	sessions.validate(token, uptimeMs()); // refreshes its last use
+}
+
+static void forgetWsClient(uint32_t id)
+{
+	std::lock_guard<std::mutex> lock(wsAgeMutex);
+	for (WsAgeSlot &slot : wsAgeSlots)
+		if (slot.id == id) { slot = WsAgeSlot(); return; }
+}
+
+void expireWsClients()
+{
+	static uint64_t nextSweep = 0;
+	uint64_t now = uptimeMs();
+	if (now < nextSweep) return;
+	nextSweep = now + 1000;
+	uint32_t expired[16]; size_t count = 0;
+	uint32_t silent[16]; size_t silentCount = 0;
+	uint32_t ping[16]; size_t pingCount = 0;
+	// sessions that have ended (12 h unused, or 24 h after sign-in): their
+	// sockets close too. Looked up first, under authMutex alone (no nesting).
+	uint32_t ids[16]; char tokens[16][core::SessionStore::TOKEN_HEX + 1]; size_t n = 0;
+	{
+		std::lock_guard<std::mutex> lock(wsAgeMutex);
+		for (WsAgeSlot &slot : wsAgeSlots)
+			if (slot.id != 0 && n < 16)
+			{
+				ids[n] = slot.id;
+				memcpy(tokens[n], slot.token, sizeof(tokens[n]));
+				n++;
+			}
+	}
+	bool ended[16] = {false};
+	{
+		std::lock_guard<std::mutex> lock(authMutex);
+		for (size_t i = 0; i < n; i++)
+			ended[i] = !sessions.alive(tokens[i], now);
+	}
+	{
+		std::lock_guard<std::mutex> lock(wsAgeMutex);
+		for (WsAgeSlot &slot : wsAgeSlots)
+		{
+			if (slot.id == 0)
+				continue;
+			bool sessionEnded = false;
+			for (size_t i = 0; i < n; i++)
+				if (ids[i] == slot.id)
+					sessionEnded = ended[i];
+			if (sessionEnded || now - slot.connectedAt > core::SessionStore::MAX_AGE_MS)
+			{
+				expired[count++] = slot.id;
+				slot = WsAgeSlot();
+				continue;
+			}
+			// a page that left without closing: closed here, so it stops
+			// counting as connected (close() takes it out of ws.count() at once)
+			core::WsAlive alive = core::wsAlive(now, slot.lastHeard, slot.lastPing);
+			if (alive == core::WsAlive::Close)
+			{
+				silent[silentCount++] = slot.id;
+				slot = WsAgeSlot();
+			}
+			else if (alive == core::WsAlive::Ping)
+			{
+				ping[pingCount++] = slot.id;
+				slot.lastPing = now;
+			}
+		}
+	}
+	for (size_t i = 0; i < count; i++) ws.close(expired[i], 1008, "Session expired");
+	for (size_t i = 0; i < silentCount; i++) ws.close(silent[i], 1001, "No answer");
+	for (size_t i = 0; i < pingCount; i++) ws.ping(ping[i]);
+}
+
+struct WsMessage
+{
+	uint32_t clientId;
+	std::string payload;
+	size_t charged = 0; // bytes held in wsBudget, given back once processed
+};
+
+std::deque<WsMessage> wsMessageQueue;
+uint64_t wsCloseAllAt = 0; // uptime ms; set on password change, acted on in loop(); 0 = none
+std::mutex wsQueueMutex;
+
+// Called from the async_tcp task. Only copies the message into the queue;
+// loop() parses and acts on it.
+static void enqueueWsMessage(uint32_t clientId, std::string &&payload, size_t charged)
+{
+	std::lock_guard<std::mutex> lock(wsQueueMutex);
+	if (wsMessageQueue.size() >= WS_QUEUE_MAX)
+	{
+		wsBudget.give(charged);
+		return; // a client flooding commands loses the excess, not the device
+	}
+	WsMessage m;
+	m.clientId = clientId;
+	m.payload = std::move(payload);
+	m.charged = charged;
+	wsMessageQueue.push_back(std::move(m));
+}
+
+// invalid: the request itself was refused (a user record that fails its
+// checks), so a user restore skips that one and goes on.
+static void sendResult(uint32_t clientId, const char *resultOf, bool ok, const char *message = nullptr, bool invalid = false)
+{
+	DynamicJsonDocument r(256);
+	r["command"] = "result";
+	r["resultof"] = resultOf;
+	r["result"] = ok;
+	if (message)
+		r["message"] = message;
+	if (invalid)
+		r["invalid"] = true;
+	wsSendJson(clientId, r);
+}
+
+// Reads the stored config for mergeSecrets(). False if the save must be
+// refused: it still carries masked passwords and a stored config exists but
+// could not be read (the passwords would be lost).
+static bool readStoredForMerge(JsonVariantConst incoming, JsonDocument &existing)
+{
+	if (readConfigDoc(existing))
+		return true;
+	existing.clear();
+	bool stored = LittleFS.exists("/config.json") || LittleFS.exists("/config.json.bak");
+	return !(stored && core::secretsNeedStored(incoming.as<JsonObjectConst>()));
+}
+
+// Persist a new admin password and invalidate every session that was opened
+// with the old one. The current password is required, except for the forced
+// change away from the factory one: an open session alone (a browser left
+// signed in) must not be enough to take the device over.
+//
+// Only the password's Digest HA1 is stored (core/adminpass.h), and since
+// review 6 neither password crosses the link: the page sends the new HA1
+// encrypted under the current one (core::openPasswordChange), so the
+// current password is always proven, the forced change too (the page keeps
+// the sign-in password's HA1 for it). The length rule is the page's, which
+// reports the length it checked (len); the device refuses the factory one.
+static bool setAdminPassword(const char *enc, const char *proof, int len, uint32_t clientId)
+{
+	AdminSnapshot current = adminSnapshot();
+	char ha1[core::HA1_HEX + 1];
+	String token = wsTokenOf(clientId);
+	if (!core::openPasswordChange(current.ha1.c_str(), token.c_str(), enc, proof, ha1))
+	{
+		writeEvent("WARN", "sys", "Password change refused: wrong current password", "");
+		sendResult(clientId, "setpassword", false, "The current password is wrong");
+		return false;
+	}
+	if (len < (int)core::MIN_ADMIN_PASSWORD_LEN || len > 64 || core::sameSecret(ha1, core::FACTORY_ADMIN_HA1))
+	{
+		sendResult(clientId, "setpassword", false, "Password must be 8-64 characters and not 'admin'");
+		return false;
+	}
+	DynamicJsonDocument doc(CONFIG_DOC_BYTES);
+	if (readConfigDoc(doc))
+	{
+		if (!doc.containsKey("general"))
+			doc.createNestedObject("general");
+		core::putAdminPassword(doc["general"], ha1, false);
+		if (!writeConfigDoc(doc))
+		{
+			sendResult(clientId, "setpassword", false, "Could not write config");
+			return false;
+		}
+	}
+	else if (!storePendingAdminHa1(ha1))
+	{
+		// Unconfigured device: NVS holds it until the first configuration
+		// save copies it into config.json (see the "configfile" handler).
+		sendResult(clientId, "setpassword", false, "Could not store the password");
+		return false;
+	}
+	{
+		std::lock_guard<std::mutex> lock(authMutex);
+		strcpy(config.adminHa1, ha1);
+		config.adminMustChange = false;
+		sessions.revokeAll();
+	}
+	writeEvent("INFO", "sys", "Admin password changed", "");
+	sendResult(clientId, "setpassword", true);
+	// Tokens are only checked at the WebSocket upgrade, so drop every open
+	// socket too (after this reply has gone out) - a stolen session must not
+	// outlive a password change.
+	wsCloseAllAt = uptimeMs() + 500;
+	return true;
+}
+
+// GPIO and settings policy: core/configpolicy.h (shared with the tests).
+#if CONFIG_IDF_TARGET_ESP32S3
+static core::PolicyBoard policyBoard() { return core::policyBoardEsp32s3(); }
+#else
+static core::PolicyBoard policyBoard() { return core::policyBoardEsp32(); }
+#endif
+static core::PolicyText policyText;
+
+// Returns NULL if acceptable, else a message for the user.
+static const char *applyConfigPolicy(JsonObject incoming)
+{
+	core::PolicyResult r = core::applyConfigPolicy(incoming, policyBoard(), config.adminHa1, config.adminMustChange, policyText);
+	if (r.ignoredPassword)
+		writeEvent("WARN", "sys", "Kept the current admin password: settings cannot change it (use Change Password)", "");
+	return r.problem;
+}
+
+// Step-up challenges (core::stepUpProofOk): one use each, two minutes, two
+// per socket at most (owner: the socket id). Under authMutex: /update checks
+// one from the TCP task.
+static core::NonceStore stepUpNonces;
+
+static uint32_t stepUpRandom() { return esp_random(); }
+
+static void wsStepUp(const char *, JsonDocument &, uint32_t clientId)
+{
+	char nonce[core::NonceStore::NONCE_HEX + 1];
+	{
+		std::lock_guard<std::mutex> lock(authMutex);
+		stepUpNonces.issue(stepUpRandom, uptimeMs(), nonce, clientId);
+	}
+	DynamicJsonDocument r(128);
+	r["command"] = "stepup";
+	r["nonce"] = (const char *)nonce;
+	wsSendJson(clientId, r);
+}
+
+// The admin password proven for action with this session token; the nonce
+// is spent either way. Never call with authMutex held.
+bool stepUpValid(const char *token, const char *nonce, const char *proof, const char *action)
+{
+	AdminSnapshot admin = adminSnapshot();
+	std::lock_guard<std::mutex> lock(authMutex);
+	if (!stepUpNonces.consume(nonce, uptimeMs()))
+		return false;
+	return core::stepUpProofOk(admin.ha1.c_str(), token, nonce, action, proof);
+}
+
+static const char *STEP_UP_REFUSED = "The admin password was not confirmed, so nothing was changed. Enter it and try again.";
+
+static void handleConfigFile(JsonDocument &incoming, uint32_t clientId)
+{
+	// the step-up answer is not a setting: kept apart, never stored
+	String stepNonce = incoming["stepnonce"] | "", stepProof = incoming["stepproof"] | "";
+	incoming.remove("stepnonce");
+	incoming.remove("stepproof");
+	DynamicJsonDocument existing(CONFIG_DOC_BYTES);
+	if (!readStoredForMerge(incoming.as<JsonVariantConst>(), existing))
+	{
+		writeEvent("ERRO", "sys", "Settings not saved: the stored settings could not be read to keep the saved passwords", "");
+		sendResult(clientId, "configfile", false, "Could not read the stored settings, so the saved passwords cannot be kept. Nothing was saved; try again.");
+		return;
+	}
+	core::mergeSecrets(incoming.as<JsonObject>(), existing.as<JsonObjectConst>());
+	const char *problem = applyConfigPolicy(incoming.as<JsonObject>());
+	if (problem)
+	{
+		sendResult(clientId, "configfile", false, problem);
+		return;
+	}
+	incoming["command"] = "configfile";
+	// Live or restart (core/livesettings.h): against the stored file the
+	// running settings were loaded from. Restart when there is none, when the
+	// running settings are not that file (refused or damaged at start-up), or
+	// when a restart is already due (an earlier save or command).
+	core::SettingsChange change = core::compareSettings(existing.as<JsonObjectConst>(), incoming.as<JsonObjectConst>());
+	bool stepUp = false;
+	for (const std::string &key : change.changed)
+		stepUp = stepUp || core::stepUpNeededFor(key);
+	// a device being set up (no settings stored yet) is set up with the
+	// password just chosen: nothing to protect yet
+	if (stepUp && existing.size() > 0)
+	{
+		String token = wsTokenOf(clientId);
+		if (!stepUpValid(token.c_str(), stepNonce.c_str(), stepProof.c_str(), "settings"))
+		{
+			writeEvent("WARN", "sys", "Settings not saved: network or MQTT change without the admin password", "");
+			sendResult(clientId, "configfile", false, STEP_UP_REFUSED);
+			return;
+		}
+	}
+	bool live = !change.restart && !configDamaged && !restartRequested();
+	if (!writeConfigDoc(incoming))
+	{
+		sendResult(clientId, "configfile", false, "Could not write config");
+		return;
+	}
+	writeEvent("INFO", "sys", "Config stored in the filesystem", String(measureJson(incoming)) + " bytes");
+	if (live)
+		live = queueLiveSettings(incoming, change.changed.empty() ? String("no changes") : String(core::changedList(change).c_str()));
+	DynamicJsonDocument r(256);
+	r["command"] = "result";
+	r["resultof"] = "configfile";
+	r["result"] = true;
+	r["restart"] = !live; // false: applied without a restart (ui.js progressFinished)
+	wsSendJson(clientId, r);
+	if (!live)
+		requestRestart("settings saved");
+}
+
+static void sendMaskedConfig(uint32_t clientId)
+{
+	DynamicJsonDocument doc(CONFIG_DOC_BYTES);
+	if (!readConfigDoc(doc))
+		return;
+	core::maskSecrets(doc.as<JsonObject>());
+	doc["command"] = "configfile";
+	wsSendJson(clientId, doc);
+}
+
+/*
+ * WebSocket commands: one handler each, looked up in wsCommands[] below.
+ * Every handler runs in loop() (processWsQueue), never in the async_tcp task.
+ */
+typedef void (*WsHandler)(const char *command, JsonDocument &root, uint32_t clientId);
+
+static void wsRemove(const char *, JsonDocument &root, uint32_t clientId)
+{
+	const char *uid = root["uid"];
+	if (!core::isValidUid(uid))
+	{
+		sendResult(clientId, "remove", false, "Invalid uid");
+		return;
+	}
+	if (!removeUserFiles(uid))
+	{
+		writeEvent("ERRO", "sys", "Delete user failed: the user could not be removed", uid);
+		sendResult(clientId, "remove", false, "The user could not be removed");
+		return;
+	}
+	// to every tab, naming the user: each open user list drops that row
+	// (without the uid a tab dropped its own pending row, whoever it was)
+	DynamicJsonDocument r(256);
+	r["command"] = "result";
+	r["resultof"] = "remove";
+	r["result"] = true;
+	r["uid"] = uid;
+	wsSendJson(0, r);
+}
+
+static void wsConfigFile(const char *, JsonDocument &root, uint32_t clientId)
+{
+	handleConfigFile(root, clientId);
+}
+
+static void wsLogout(const char *, JsonDocument &root, uint32_t clientId)
+{
+	// the socket's own session, not the token the message names: a stale
+	// one in the message closed this socket and left its session valid for
+	// 12 hours (review 7)
+	String own = wsTokenOf(clientId);
+	const char *token = own.c_str();
+	{
+		std::lock_guard<std::mutex> lock(authMutex);
+		sessions.revoke(token);
+	}
+	// every socket of this session: the token is only checked at the
+	// upgrade, so another tab opened with it stayed signed in
+	uint32_t ids[16];
+	size_t n = wsClientsOfToken(token, ids, 16);
+	for (size_t i = 0; i < n; i++)
+		if (ids[i] != clientId)
+			ws.close(ids[i], 1008, "Session ended");
+	ws.close(clientId);
+}
+
+static void wsSetPassword(const char *, JsonDocument &root, uint32_t clientId)
+{
+	setAdminPassword(root["ha1enc"] | "", root["proof"] | "", core::jsonInt(root["len"], 0), clientId);
+}
+
+static void wsUserList(const char *, JsonDocument &root, uint32_t clientId)
+{
+	sendUserList(root["page"] | 1, clientId, core::jsonInt(root["backup"], 0) == 1);
+}
+
+static void wsStatus(const char *, JsonDocument &, uint32_t clientId)
+{
+	sendStatus(clientId);
+}
+
+static void wsRestart(const char *, JsonDocument &, uint32_t clientId)
+{
+	sendResult(clientId, "restart", true);
+	requestRestart("Restart from the web page");
+}
+
+static void wsDestroy(const char *, JsonDocument &root, uint32_t clientId)
+{
+	String token = wsTokenOf(clientId);
+	if (!stepUpValid(token.c_str(), root["stepnonce"] | "", root["stepproof"] | "", "destroy"))
+	{
+		writeEvent("WARN", "sys", "Factory reset refused: admin password not confirmed", "");
+		sendResult(clientId, "destroy", false, STEP_UP_REFUSED);
+		return;
+	}
+	sendResult(clientId, "destroy", true);
+	requestFactoryReset();
+}
+
+static void wsEventLog(const char *, JsonDocument &root, uint32_t clientId)
+{
+	sendEventLog(root["page"] | 1, root["filename"] | "", clientId, (size_t)(root["pos"] | 0));
+}
+
+static void wsLatestLog(const char *, JsonDocument &root, uint32_t clientId)
+{
+	sendLatestLog(root["page"] | 1, root["filename"] | "", clientId, (size_t)(root["pos"] | 0));
+}
+
+static void wsListFiles(const char *, JsonDocument &root, uint32_t clientId)
+{
+	sendFileList(root["page"] | 1, clientId);
+}
+
+static void wsLogMaintenance(const char *, JsonDocument &root, uint32_t clientId)
+{
+	logMaintenance(root["action"] | "", root["filename"] | "", clientId);
+}
+
+// answered since 1.9.1: the page waits for the step-up's verdict
+static void wsClearEvent(const char *, JsonDocument &, uint32_t clientId)
+{
+	LittleFS.remove(LOG_EVENT_FILE);
+	writeEvent("WARN", "sys", "Event log cleared!", "");
+	sendResult(clientId, "clearevent", true);
+}
+
+static void wsClearLatest(const char *, JsonDocument &, uint32_t clientId)
+{
+	LittleFS.remove(LOG_LATEST_FILE);
+	writeEvent("WARN", "sys", "Latest Access log cleared!", "");
+	sendResult(clientId, "clearlatest", true);
+}
+
+// The editor recognises this refusal and offers to replace the user.
+#define USER_EXISTS_MESSAGE "A user with this UID already exists"
+
+static void wsUserFile(const char *, JsonDocument &root, uint32_t clientId)
+{
+	// keeppin: an edit that left the PIN empty keeps the stored one (the
+	// user list no longer sends PINs to the browser). From the record being
+	// edited: the old UID when it is renamed.
+	if (core::jsonInt(root["keeppin"], 0) == 1 && *(root["pincode"] | "") == '\0')
+	{
+		const char *from = root["replaces"] | (const char *)(root["uid"] | "");
+		char lower[core::MAX_UID_LEN + 1];
+		core::lowerUid(from, lower);
+		DynamicJsonDocument stored(1024);
+		bool read = lower[0] != '\0' && readJsonFileRecover((String("/P/") + lower).c_str(), stored);
+		String pin = read ? String(stored["pincode"] | "") : String();
+		if (!read || !root["pincode"].set(pin))
+		{
+			sendResult(clientId, "userfile", false, "The stored PIN could not be read, so nothing was changed");
+			return;
+		}
+	}
+	DynamicJsonDocument record(1024);
+	if (const char *problem = core::checkUserRecord(root.as<JsonObjectConst>(), record.to<JsonObject>()))
+	{
+		sendResult(clientId, "userfile", false, problem, true);
+		return;
+	}
+	String path = String("/P/") + (const char *)record["uid"];
+	// create: a new user, or a changed UID, from the editor. Checked here,
+	// not in the browser, whose user list may be stale: a typo must not
+	// silently replace someone else's card. A .bak alone counts (the reader
+	// recovers it).
+	if (core::jsonInt(root["create"], 0) == 1 && (LittleFS.exists(path) || LittleFS.exists(path + ".bak")))
+	{
+		sendResult(clientId, "userfile", false, USER_EXISTS_MESSAGE);
+		return;
+	}
+	// a new user (or a changed UID), admin access or a changed PIN: the
+	// admin password as well (core::userFileNeedsStepUp, plan 1.9.1 B1)
+	{
+		bool stored = LittleFS.exists(path) || LittleFS.exists(path + ".bak");
+		DynamicJsonDocument before(1024);
+		String storedPin = stored && readJsonFileRecover(path.c_str(), before) ? String(before["pincode"] | "") : String();
+		if (core::userFileNeedsStepUp(core::jsonInt(root["create"], 0) == 1, stored, record.as<JsonObjectConst>(), storedPin.c_str()) &&
+			!stepUpValid(wsTokenOf(clientId).c_str(), root["stepnonce"] | "", root["stepproof"] | "", "userfile"))
+		{
+			writeEvent("WARN", "sys", "User not saved: a new user, admin access or a PIN change needs the admin password", (const char *)record["uid"]);
+			sendResult(clientId, "userfile", false, STEP_UP_REFUSED);
+			return;
+		}
+	}
+	// replaces: a changed UID. The new record and the old one's removal are
+	// one command: the editor used to send "remove" after the save, so a
+	// dropped link left the old card valid. If the old one will not go, the
+	// new one is undone (the record it overwrote, if any, put back).
+	char old[core::MAX_UID_LEN + 1];
+	core::lowerUid(root["replaces"], old); // not a valid uid: no rename
+	const char *uid = record["uid"];
+	bool renaming = old[0] != '\0' && strcmp(old, uid) != 0;
+	DynamicJsonDocument previous(1024);
+	bool hadRecord = LittleFS.exists(path) || LittleFS.exists(path + ".bak");
+	if (!hadRecord && core::userLimitReached(storedUserCount()))
+	{
+		sendResult(clientId, "userfile", false, USER_LIMIT_MESSAGE);
+		return;
+	}
+	if (!hadRecord && !fsFreeAtLeast(core::USER_MIN_FREE_BYTES))
+	{
+		sendResult(clientId, "userfile", false, USER_STORAGE_FULL_MESSAGE);
+		return;
+	}
+	if (renaming && hadRecord && !readJsonFileRecover(path.c_str(), previous))
+	{
+		sendResult(clientId, "userfile", false, "Failed to save user");
+		return;
+	}
+	bool ok = writeJsonFileAtomic(path.c_str(), record);
+	if (ok && renaming)
+	{
+		String oldPath = String("/P/") + old;
+		removeUserFiles(old);
+		if (LittleFS.exists(oldPath) || LittleFS.exists(oldPath + ".bak"))
+		{
+			if (hadRecord)
+				writeJsonFileAtomic(path.c_str(), previous);
+			else
+				removeUserFiles(uid);
+			writeEvent("WARN", "sys", "UID change refused: the old record could not be removed", String(old) + " -> " + uid);
+			sendResult(clientId, "userfile", false, "Could not remove the old UID, so nothing was changed");
+			return;
+		}
+	}
+	sendResult(clientId, "userfile", ok, ok ? nullptr : "Failed to save user");
+}
+
+// testrelay1 .. testrelay4
+static void wsTestRelay(const char *command, JsonDocument &, uint32_t clientId)
+{
+	int relay = core::testRelayIndex(command); // -1 has no pin either
+	if (!core::relayHasPin(relayBank(), relay))
+	{
+		sendResult(clientId, "testrelay", false, "This relay has no pin yet: set it under Doors & Readers, then Save & Reboot");
+		return;
+	}
+	activateRelay[relay] = true;
+	// the page says which relay fired (Test gave no feedback)
+	char reply[48];
+	snprintf(reply, sizeof(reply), "{\"command\":\"giveAccess\",\"relay\":%d}", relay + 1);
+	wsSendText(clientId, reply);
+}
+
+// Log Settings page: store and apply at once, without the restart a full
+// configuration save causes.
+static void wsSetLogging(const char *, JsonDocument &root, uint32_t clientId)
+{
+	bool on = core::jsonInt(root["enabled"], 1) != 0;
+	DynamicJsonDocument doc(CONFIG_DOC_BYTES);
+	if (!readConfigDoc(doc))
+	{
+		sendResult(clientId, "setlogging", false, "Save the device settings first (Settings), then set logging");
+		return;
+	}
+	if (!doc.containsKey("general"))
+		doc.createNestedObject("general");
+	doc["general"]["logging"] = on ? 1 : 0;
+	if (!writeConfigDoc(doc))
+	{
+		sendResult(clientId, "setlogging", false, "Could not write config");
+		return;
+	}
+	// record the change in the log it affects, before turning it off
+	if (!on)
+		writeEvent("INFO", "sys", "Logging disabled", "");
+	config.loggingEnabled = on;
+	liveSettingsLogging(on); // a queued live apply must not undo it
+	if (on)
+		writeEvent("INFO", "sys", "Logging enabled", "");
+	sendResult(clientId, "setlogging", true);
+}
+
+static void wsScan(const char *, JsonDocument &, uint32_t)
+{
+	wifiScanRequested = true;
+}
+
+static void wsGetTime(const char *, JsonDocument &, uint32_t clientId)
+{
+	sendTime(clientId);
+}
+
+static void wsSetTime(const char *, JsonDocument &root, uint32_t clientId)
+{
+	// moving a clock that is already set decides which dated and
+	// opening-hours users get in: the admin password as well (plan 1.9.1
+	// B1). A lost clock is set with the session alone (the page does it
+	// after sign-in).
+	if (deviceClock.trusted && !stepUpValid(wsTokenOf(clientId).c_str(), root["stepnonce"] | "", root["stepproof"] | "", "settime"))
+	{
+		writeEvent("WARN", "sys", "Time not changed: the admin password was not confirmed", "");
+		sendResult(clientId, "settime", false, STEP_UP_REFUSED);
+		return;
+	}
+	setClockFromBrowser(root["epoch"] | (time_t)0, wsAddressOf(clientId));
+	sendTime(clientId);
+}
+
+static void wsGetConf(const char *, JsonDocument &, uint32_t clientId)
+{
+	sendMaskedConfig(clientId);
+}
+
+struct WsCommand
+{
+	const char *name;
+	bool beforePasswordChange; // allowed while the admin password is still the factory one
+	// needs the admin password as well as the session (core::stepUpProofOk,
+	// action = the command's name), checked before the handler: these open
+	// a door, restart it (a maglock on NO releases), remove a credential or
+	// erase the evidence (plan 1.9.1 B1, D2; review 8 V1). userfile,
+	// settime, configfile and destroy decide in their handlers.
+	bool stepUp;
+	WsHandler handler;
+};
+
+static const WsCommand wsCommands[] = {
+	{"status", true, false, wsStatus},
+	{"gettime", true, false, wsGetTime},
+	{"setpassword", true, false, wsSetPassword},
+	{"getconf", true, false, wsGetConf},
+	{"logout", true, false, wsLogout},
+	{"stepup", false, false, wsStepUp},
+	{"remove", false, true, wsRemove},
+	{"configfile", false, false, wsConfigFile},
+	{"userlist", false, false, wsUserList},
+	{"restart", false, true, wsRestart},
+	{"destroy", false, false, wsDestroy},
+	{"geteventlog", false, false, wsEventLog},
+	{"getlatestlog", false, false, wsLatestLog},
+	{"listfiles", false, false, wsListFiles},
+	{"logMaintenance", false, false, wsLogMaintenance},
+	{"clearevent", false, true, wsClearEvent},
+	{"clearlatest", false, true, wsClearLatest},
+	{"userfile", false, false, wsUserFile},
+	{"testrelay1", false, true, wsTestRelay},
+	{"testrelay2", false, true, wsTestRelay},
+	{"testrelay3", false, true, wsTestRelay},
+	{"testrelay4", false, true, wsTestRelay},
+	{"setlogging", false, true, wsSetLogging},
+	{"scan", false, false, wsScan},
+	{"settime", false, false, wsSetTime},
+};
+
+void processWsMessage(WsMessage &incomingMessage)
+{
+	uint32_t clientId = incomingMessage.clientId;
+	if (!ws.hasClient(clientId))
+		return; // browser went away while the message was queued
+
+	DynamicJsonDocument root(CONFIG_DOC_BYTES);
+	auto error = deserializeJson(root, incomingMessage.payload.c_str(), incomingMessage.payload.size());
+	if (error)
+	{
+		// Answer, or the page waits for ever ("Saving..."). Valid JSON too
+		// big for the document: read just the command, so the reply goes to
+		// whatever is waiting for it (a save, a restore).
+		const char *resultOf = "message";
+		if (error == DeserializationError::NoMemory)
+		{
+			StaticJsonDocument<32> filter;
+			filter["command"] = true;
+			StaticJsonDocument<128> head;
+			if (!deserializeJson(head, incomingMessage.payload.c_str(), incomingMessage.payload.size(), DeserializationOption::Filter(filter)))
+				for (const WsCommand &c : wsCommands)
+					if (strcmp(head["command"] | "", c.name) == 0)
+						resultOf = c.name; // the table's string, never the sender's
+		}
+		sendResult(clientId, resultOf, false, error == DeserializationError::NoMemory ? "The message is too large for the device to read" : "The device could not read the message (not valid JSON)");
+		return;
+	}
+	const char *command = root["command"];
+	if (command == nullptr)
+	{
+		sendResult(clientId, "message", false, "The message has no command"); // upstream passed NULL to strcmp here and crashed
+		return;
+	}
+	for (const WsCommand &c : wsCommands)
+	{
+		if (strcmp(command, c.name) != 0)
+			continue;
+		if (!c.beforePasswordChange && config.adminMustChange)
+			sendResult(clientId, command, false, "Change the default admin password first");
+		else if (c.stepUp && !stepUpValid(wsTokenOf(clientId).c_str(), root["stepnonce"] | "", root["stepproof"] | "", c.name))
+		{
+			writeEvent("WARN", "sys", "Refused: the admin password was not confirmed", c.name);
+			// testrelayN answers as "testrelay" (wsTestRelay)
+			sendResult(clientId, core::testRelayIndex(c.name) >= 0 ? "testrelay" : c.name, false, STEP_UP_REFUSED);
+		}
+		else
+			c.handler(command, root, clientId);
+		return;
+	}
+	// answered, as every other refusal: it used to be dropped silently (H27.1)
+	sendResult(clientId, "message", false, "Unknown command");
+}
+
+// Handles WebSocket events (runs in the async_tcp task)
+void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len)
+{
+	if (type == WS_EVT_CONNECT)
+	{
+		servedRequest = true; // a signed-in UI: part of confirming a new image
+		WsClientState *state = new WsClientState();
+		state->connectedAt = uptimeMs();
+		client->_tempObject = state;
+		// arg: the upgrade request, whose token handleHandshake validated:
+		// ?token= or the X-Session-Token header, in that order, as
+		// hasValidSession reads it. A header token was tracked as "", so a
+		// logout on that socket revoked nothing (review 8 V18).
+		AsyncWebServerRequest *request = static_cast<AsyncWebServerRequest *>(arg);
+		String token;
+		if (request != NULL && request->hasParam("token"))
+			token = request->getParam("token")->value();
+		else if (request != NULL && request->hasHeader("X-Session-Token"))
+			token = request->header("X-Session-Token");
+		if (!trackWsClient(client->id(), state->connectedAt, token.c_str(), (uint32_t)client->remoteIP()))
+		{
+			delete state; client->_tempObject = NULL;
+			client->close(1013, "Too many sessions");
+			return;
+		}
+		if (adminSnapshot().mustChange)
+		{
+			client->text("{\"command\":\"mustchangepassword\"}");
+		}
+	}
+	else if (type == WS_EVT_DISCONNECT)
+	{
+		forgetWsClient(client->id());
+		delete static_cast<WsClientState *>(client->_tempObject);
+		client->_tempObject = NULL;
+	}
+	else if (type == WS_EVT_ERROR)
+	{
+#ifdef DEBUG
+		Serial.printf("[ WARN ] WebSocket[%s][%u] error(%u)\r\n", server->url(), client->id(), *((uint16_t *)arg));
+#endif
+	}
+	else if (type == WS_EVT_PONG)
+	{
+		heardWsClient(client->id());
+	}
+	else if (type == WS_EVT_DATA)
+	{
+		heardWsClient(client->id());
+		usedWsClient(client->id());
+		AwsFrameInfo *info = (AwsFrameInfo *)arg;
+		WsClientState *state = static_cast<WsClientState *>(client->_tempObject);
+		if (state == NULL || uptimeMs() - state->connectedAt > core::SessionStore::MAX_AGE_MS)
+		{
+			client->close(1008, "Session expired");
+			return;
+		}
+		core::MessageAssembler *assembler = &state->assembler;
+		// not info->message_opcode: the library leaves it 0 for a frame that
+		// arrives in one read, which dropped every command (see trackType)
+		if (assembler == NULL || assembler->trackType(info->opcode) != WS_TEXT)
+			return;
+		// first chunk of the first frame starts a new message
+		if (info->num == 0 && info->index == 0)
+			assembler->reset(info->final ? info->len : 0);
+		assembler->append(data, len);
+		// last chunk of the final frame completes it
+		if (info->final && (info->index + len) == info->len)
+		{
+			if (!assembler->overflowed())
+			{
+				size_t charged = 0;
+				std::string payload = assembler->take(&charged);
+				enqueueWsMessage(client->id(), std::move(payload), charged);
+			}
+			else
+			{
+				bool busy = assembler->refusedByBudget();
+				assembler->take();
+				client->text(busy ? "{\"command\":\"result\",\"resultof\":\"message\",\"result\":false,\"message\":\"Device busy, try again\"}"
+								  : "{\"command\":\"result\",\"resultof\":\"message\",\"result\":false,\"message\":\"Message too large\"}");
+			}
+		}
+	}
+}
+
+void processWsQueue()
+{
+	if (wsCloseAllAt != 0 && uptimeMs() >= wsCloseAllAt)
+	{
+		wsCloseAllAt = 0;
+		ws.closeAll(1008, "Session ended");
+	}
+	// At most WS_QUEUE_SLICE_MS per loop() pass (at least one message), as
+	// flushLogQueue(): 16 queued messages, each a flash write or a log page,
+	// held up the readers and the exit buttons for seconds. The rest waits
+	// for the next pass.
+	uint64_t until = uptimeMs() + WS_QUEUE_SLICE_MS;
+	for (;;)
+	{
+		if (uptimeMs() >= until)
+			return;
+		WsMessage msg;
+		{
+			std::lock_guard<std::mutex> lock(wsQueueMutex);
+			if (wsMessageQueue.empty())
+				return;
+			msg = std::move(wsMessageQueue.front());
+			wsMessageQueue.pop_front();
+		}
+		processWsMessage(msg);
+		wsBudget.give(msg.charged);
+		// 16 queued messages (each a flash write, a log page) can outlast the
+		// 8 s loop watchdog together; yield() does not feed it
+		esp_task_wdt_reset();
+		yield();
+	}
+}

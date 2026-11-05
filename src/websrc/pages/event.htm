@@ -1,0 +1,53 @@
+<template id="eventcontent">
+<div class="logpage">
+    <div class="pagehead">
+        <h1>Event Log</h1>
+        <p>What the reader did and what went wrong: start-ups, Wi-Fi, MQTT, firmware updates, refused cards.</p>
+    </div>
+    <div id="eventfilebanner" class="banner info" hidden>
+        <svg class="icon"><use href="#i-file"/></svg>
+        <div>You are looking at the file <code id="eventfilename"></code>, not the current log.
+            <a href="#" data-onclick="showCurrentLog">Show the current log</a></div>
+    </div>
+    <section class="card flush logcard" id="eventcard">
+        <div class="logtools">
+            <div class="toolbar">
+                <label class="search">
+                    <svg class="icon"><use href="#i-search"/></svg>
+                    <input type="search" id="eventsearch" placeholder="Search description, source, data, date" aria-label="Search the event log" autocomplete="off" spellcheck="false" data-oninput="logSearch" data-arg="value">
+                </label>
+                <button type="button" class="btn small" id="eventorder" data-onclick="logToggleOrder" title="Change the order"><svg class="icon icon-sm"><use href="#i-clock"/></svg><span id="eventordertext">Newest first</span></button>
+                <button type="button" class="iconbtn" data-onclick="reloadLog" aria-label="Reload the log" title="Reload"><svg class="icon"><use href="#i-rotate"/></svg></button>
+            </div>
+            <div class="segmented logfilter" role="radiogroup" aria-label="Show">
+                <label><input type="radio" name="eventkind" value="all" checked data-onchange="logFilter" data-arg="value">All <span class="count" id="eventcount-all"></span></label>
+                <label><input type="radio" name="eventkind" value="ERRO" data-onchange="logFilter" data-arg="value">Errors <span class="count" id="eventcount-ERRO"></span></label>
+                <label><input type="radio" name="eventkind" value="WARN" data-onchange="logFilter" data-arg="value">Warnings <span class="count" id="eventcount-WARN"></span></label>
+                <label><input type="radio" name="eventkind" value="INFO" data-onchange="logFilter" data-arg="value">Info <span class="count" id="eventcount-INFO"></span></label>
+            </div>
+            <div class="logsummary muted small" id="eventsummary" aria-live="polite"></div>
+        </div>
+        <div id="loading-img" class="loading" role="status">
+            <span class="spinner" aria-hidden="true"></span><span id="loadpages">Loading the log&hellip;</span>
+        </div>
+        <div class="tablewrap">
+            <table id="eventtable" class="data logtable eventlogtable" hidden></table>
+        </div>
+        <div id="eventempty" class="empty" hidden>
+            <p id="eventemptytext"></p>
+            <button type="button" id="eventemptyclear" class="btn small" data-onclick="logClearSearch">Clear search and filter</button>
+        </div>
+        <div class="pager" id="eventpager" hidden>
+            <button type="button" class="btn small" id="eventprev" data-onclick="logPage" data-arg="prev"><svg class="icon icon-sm flip"><use href="#i-chevron"/></svg>Previous</button>
+            <span id="eventpagetext"></span>
+            <button type="button" class="btn small" id="eventnext" data-onclick="logPage" data-arg="next">Next<svg class="icon icon-sm"><use href="#i-chevron"/></svg></button>
+        </div>
+    </section>
+    <div class="actions logactions">
+        <span class="muted small" id="eventcleartip"></span>
+        <button type="button" id="cleareventlogbtn" disabled class="btn danger" data-onclick="clearevent"><svg class="icon icon-sm"><use href="#i-trash"/></svg>Clear log</button>
+        <button type="button" id="saveeventlogbtn" disabled class="btn primary" data-onclick="saveevent"><svg class="icon icon-sm"><use href="#i-download"/></svg>Download</button>
+        <a id="downloadEvent" hidden></a>
+    </div>
+</div>
+</template>

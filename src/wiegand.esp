@@ -1,0 +1,128 @@
+// Wiegand readers: one decoder per reader, fed from per-pin interrupts.
+// Replaces the upstream library, whose static state allowed only one reader.
+
+struct WiegandPort
+{
+	core::WiegandDecoder decoder;
+	bool active = false;
+	portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+	uint32_t overrunsSeen = 0; // the overrun count pollWiegandPort last saw (loop() only)
+};
+
+WiegandPort wiegandPorts[MAX_READERS];
+
+// Clock for bit timing, in microseconds. The interrupt can fire while the
+// flash cache is off (LittleFS writes), so it must not call anything in flash:
+// Arduino's millis() is in flash on this core, esp_timer_get_time() is in IRAM.
+// The decoder only uses differences (frame gap, glitch filter), so the 32-bit
+// wrap every 71 minutes does not matter.
+static inline uint32_t IRAM_ATTR wiegandClock()
+{
+	return (uint32_t)esp_timer_get_time();
+}
+
+static void IRAM_ATTR wiegandIsrD0(void *arg)
+{
+	WiegandPort *p = static_cast<WiegandPort *>(arg);
+	portENTER_CRITICAL_ISR(&p->mux);
+	p->decoder.onBit(0, wiegandClock());
+	portEXIT_CRITICAL_ISR(&p->mux);
+}
+
+static void IRAM_ATTR wiegandIsrD1(void *arg)
+{
+	WiegandPort *p = static_cast<WiegandPort *>(arg);
+	portENTER_CRITICAL_ISR(&p->mux);
+	p->decoder.onBit(1, wiegandClock());
+	portEXIT_CRITICAL_ISR(&p->mux);
+}
+
+// The GPIO ISR service, installed IRAM-resident; shared with the exit buttons
+// (door.esp). If something installed the service first (without the IRAM
+// flag) the readers would silently lose bits again, so refuse.
+static bool installIramGpioIsrService()
+{
+	static bool installed = false;
+	if (installed)
+		return true;
+	esp_err_t err = gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
+	if (err != ESP_OK)
+	{
+		writeEvent("ERRO", "rfid", "GPIO interrupt service unavailable: Wiegand readers off, exit buttons polled only", String((int)err));
+		return false;
+	}
+	installed = true;
+	return true;
+}
+
+bool setupWiegandPort(int port, uint8_t d0, uint8_t d1)
+{
+	if (port < 0 || port >= MAX_READERS || d0 == 255 || d1 == 255 || d0 == d1)
+		return false;
+	WiegandPort &p = wiegandPorts[port];
+	p.decoder.reset();
+	// Readers drive the lines (usually open collector with their own
+	// pull-up). The internal pull-up keeps a disconnected reader quiet on
+	// pins that have one; GPIO34-39 have none (INPUT_PULLUP does nothing
+	// there), so reader 1 on the VOANZO board (34/35) depends on the external
+	// interface's pull-ups (README: Wiring).
+	pinMode(d0, INPUT_PULLUP);
+	pinMode(d1, INPUT_PULLUP);
+	if (!installIramGpioIsrService())
+		return false;
+	// Registered with the IDF directly, not attachInterruptArg(): Arduino's
+	// dispatcher (__onPinInterrupt) is in flash and its ISR service is
+	// installed without ESP_INTR_FLAG_IRAM (CONFIG_ARDUINO_ISR_IRAM is off), so
+	// every GPIO interrupt was masked during LittleFS writes and the edges that
+	// arrived meanwhile collapsed into one: a swipe at one reader while the
+	// other's access was being logged lost bits and was discarded as noise.
+	gpio_set_intr_type((gpio_num_t)d0, GPIO_INTR_NEGEDGE);
+	gpio_set_intr_type((gpio_num_t)d1, GPIO_INTR_NEGEDGE);
+	gpio_isr_handler_add((gpio_num_t)d0, wiegandIsrD0, &p);
+	gpio_isr_handler_add((gpio_num_t)d1, wiegandIsrD1, &p);
+	gpio_intr_enable((gpio_num_t)d0);
+	gpio_intr_enable((gpio_num_t)d1);
+	p.active = true;
+	return true;
+}
+
+// Called from loop(): true when a complete card or key frame has arrived.
+// lost (optional): set when frames were lost since the last poll (the
+// queue overran; counted in the interrupt, so compared with the last count
+// seen here, not just within this call).
+bool pollWiegandPort(int port, bool removeParityBits, core::WiegandResult &out, bool *lost)
+{
+	if (lost)
+		*lost = false;
+	if (port < 0 || port >= MAX_READERS || !wiegandPorts[port].active)
+		return false;
+	WiegandPort &p = wiegandPorts[port];
+	portENTER_CRITICAL(&p.mux);
+	uint32_t parityBefore = p.decoder.parityErrors();
+	bool got = p.decoder.poll(wiegandClock(), removeParityBits, out);
+	bool parityError = p.decoder.parityErrors() != parityBefore;
+	uint32_t overruns = p.decoder.overruns();
+	bool overrun = overruns != p.overrunsSeen;
+	p.overrunsSeen = overruns;
+	portEXIT_CRITICAL(&p.mux);
+	if (lost)
+		*lost = overrun;
+	if (parityError)
+		writeEvent("WARN", "rfid", "Wiegand frame with bad parity dropped", String("reader ") + (port + 1));
+	if (overrun)
+		writeEvent("WARN", "rfid", "Wiegand frames lost: more arrived than the controller could take", String("reader ") + (port + 1));
+	return got;
+}
+
+// The reader's noise counters for the Status page; false if it is not a
+// running Wiegand reader. Read under the lock the interrupt takes.
+bool wiegandCounters(int port, core::WiegandCounters &out)
+{
+	if (port < 0 || port >= MAX_READERS || !wiegandPorts[port].active)
+		return false;
+	WiegandPort &p = wiegandPorts[port];
+	portENTER_CRITICAL(&p.mux);
+	out = p.decoder.counters();
+	portEXIT_CRITICAL(&p.mux);
+	return true;
+}

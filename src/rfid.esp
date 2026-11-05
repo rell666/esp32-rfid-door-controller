@@ -1,0 +1,405 @@
+// Card and PIN handling, one session per reader.
+//
+// Both readers are Wiegand readers (upstream's MFRC522, PN532 and RDM6300
+// support was removed, 2026-10-16). Each reader can be
+// bound to one door (relay) and drives its own LED and buzzer lines, so two
+// standalone Wiegand readers on one board each open only their own door.
+//
+// The session logic (card, PIN step, PIN-only entry, decision) is
+// core::ReaderSession (core/reader.h), tested on the host. This file reads
+// the hardware, feeds it, and acts on the result.
+
+struct Reader
+{
+	int index = 0;        // 0 = reader 1, 1 = reader 2
+	int wiegandPort = -1; // >= 0 once its Wiegand port started
+	core::ReaderSession session;
+	// the reader's own LED and buzzer control lines
+	core::FeedbackPattern led, buzz;
+	int8_t ledLevel = -1, buzzLevel = -1;
+};
+
+Reader rfidReaders[MAX_READERS];
+
+// NVS keys of reader i's lockout levels: wrong PINs, kept so a power cycle
+// does not clear a lockout; unknown cards up to 1.4.2 (only erased now).
+static String pinLockKey(int i)
+{
+	return String("pinlock") + (i + 1);
+}
+
+static String cardLockKey(int i)
+{
+	return String("cardlock") + (i + 1);
+}
+
+// setup(): resume the lockouts that were running when the board restarted.
+// PIN-only entries at every reader (core::ReaderSettings::pinOnlyLockout),
+// kept in NVS as the readers' own lockouts.
+static core::PinLockout pinOnlyLockout;
+static const char *PIN_ONLY_LOCK_KEY = "pinonly";
+
+void restorePinLockout()
+{
+	// up to 1.4.0 one keypad lockout ("pinlock") covered every reader: resume
+	// it on each, then keep it per reader
+	uint32_t shared = storedLockLevel("pinlock");
+	if (shared != 0)
+	{
+		for (int i = 0; i < MAX_READERS; i++)
+			if (storedLockLevel(pinLockKey(i).c_str()) < shared)
+				storeLockLevel(pinLockKey(i).c_str(), shared);
+		storeLockLevel("pinlock", 0);
+	}
+	for (int i = 0; i < MAX_READERS; i++)
+	{
+		core::PinLockout &pl = rfidReaders[i].session.pinLockout();
+		uint32_t level = storedLockLevel(pinLockKey(i).c_str());
+		if (level == 0)
+			continue;
+		pl.restore(level, uptimeMs());
+		writeEvent("WARN", "rfid", "Keypad lockout resumed after restart", String("reader ") + (i + 1) + ": " + (pl.level() / 1000) + " s");
+	}
+	uint32_t pinOnly = storedLockLevel(PIN_ONLY_LOCK_KEY);
+	if (pinOnly != 0)
+	{
+		pinOnlyLockout.restore(pinOnly, uptimeMs());
+		writeEvent("WARN", "rfid", "PIN-only lockout resumed after restart", String("every reader: ") + (pinOnlyLockout.level() / 1000) + " s");
+	}
+	// unknown cards no longer lock a reader: forget a card lockout stored by 1.4.2 or earlier
+	for (int i = 0; i < MAX_READERS; i++)
+		if (storedLockLevel(cardLockKey(i).c_str()) != 0)
+			storeLockLevel(cardLockKey(i).c_str(), 0);
+}
+
+bool anyReaderWaitingForPin()
+{
+	for (int i = 0; i < MAX_READERS; i++)
+		if (rfidReaders[i].session.waitingForPin())
+			return true;
+	return false;
+}
+
+/*
+ * Reader feedback (the reader's own LED and buzzer control lines)
+ */
+static void applyFeedbackPin(uint8_t pin, bool on, bool activeHigh, int8_t &last)
+{
+	if (pin == 255)
+		return;
+	int8_t level = (on == activeHigh) ? HIGH : LOW;
+	if (level != last)
+	{
+		digitalWrite(pin, level);
+		last = level;
+	}
+}
+
+void readerFeedbackLoop()
+{
+	for (int i = 0; i < MAX_READERS; i++)
+	{
+		ReaderConfig &rc = config.readers[i];
+		Reader &r = rfidReaders[i];
+		if (!rc.enabled)
+			continue;
+		applyFeedbackPin(rc.ledPin, r.led.active(currentMillis), rc.feedbackActiveHigh, r.ledLevel);
+		applyFeedbackPin(rc.beeperPin, r.buzz.active(currentMillis), rc.feedbackActiveHigh, r.buzzLevel);
+	}
+}
+
+static void readerBeep(Reader &r, const core::Beep &b)
+{
+	r.buzz.start(b.count, b.onMs, b.offMs, uptimeMs());
+}
+
+static void setupReaderFeedbackPins(int i)
+{
+	ReaderConfig &rc = config.readers[i];
+	uint8_t pins[] = {rc.ledPin, rc.beeperPin};
+	for (uint8_t p : pins)
+	{
+		if (p != 255)
+		{
+			// idle (off) level first, as for the relays: pinMode(OUTPUT)
+			// alone drives LOW, a blip on an active-low LED or buzzer
+			digitalWrite(p, rc.feedbackActiveHigh ? LOW : HIGH);
+			pinMode(p, OUTPUT);
+			digitalWrite(p, rc.feedbackActiveHigh ? LOW : HIGH);
+		}
+	}
+}
+
+/*
+ * The user files, for core::ReaderSession
+ */
+struct FirmwareUserIo
+{
+	core::Lookup lookup(const char *uid, core::UserRecord &out)
+	{
+		if (!core::isValidUid(uid))
+			return core::Lookup::Missing;
+		DynamicJsonDocument json(1024);
+		if (json.capacity() == 0)
+		{
+			writeEvent("WARN", "sys", "Not enough memory to read a user record", String(ESP.getMaxAllocHeap()) + " bytes largest free block");
+			memGuard.noteBusy();
+			return core::Lookup::Busy;
+		}
+		String path = String("/P/") + uid;
+		// recovers /P/<uid>.bak before deciding that the credential is absent;
+		// out of memory is not absent: the card is refused as Busy, not Unknown
+		bool noMemory = false;
+		if (!readJsonFileRecover(path.c_str(), json, &noMemory))
+		{
+			if (noMemory)
+				memGuard.noteBusy();
+			else
+				memGuard.noteLookupOk();
+			return noMemory ? core::Lookup::Busy : core::Lookup::Missing;
+		}
+		memGuard.noteLookupOk();
+		out.user = json["user"] | "";
+		out.pincode = json["pincode"] | "";
+		const char *keys[] = {"acctype", "acctype2", "acctype3", "acctype4"};
+		// as the RAM index lists them (core::recordRole/recordEpoch)
+		for (int i = 0; i < MAX_NUM_RELAYS; i++)
+			out.acctype[i] = core::recordRole(json[keys[i]]);
+		out.validSince = core::recordEpoch(json["validsince"]);
+		out.validUntil = core::recordEpoch(json["validuntil"]);
+		return core::Lookup::Found;
+	}
+
+	void clock(core::AccessInput &in)
+	{
+		in.now = (uint32_t)deviceClock.epoch;
+		in.timeTrusted = deviceClock.trusted;
+		in.hoursRestricted = core::hoursRestricted(config.openingHours);
+		// day and hour both in local time (upstream took the day from UTC)
+		in.withinOpeningHours = deviceClock.trusted && core::openAt(config.openingHours, deviceClock.local.tm_wday, deviceClock.local.tm_hour);
+	}
+};
+
+/*
+ * Acting on a decision
+ */
+static void sendPiccScan(const Reader &r, const core::ReaderResult &res, bool known)
+{
+	DynamicJsonDocument root(512);
+	root["command"] = "piccscan";
+	root["uid"] = res.shownUid.c_str();
+	root["type"] = res.type.c_str();
+	root["known"] = known ? 1 : 0;
+	if (known)
+	{
+		root["acctype"] = res.acctype;
+		root["user"] = res.username.c_str();
+	}
+	root["reader"] = r.index + 1;
+	wsSendJson(0, root);
+}
+
+static const char *deniedReason(core::Verdict v)
+{
+	switch (v)
+	{
+	case core::Verdict::Expired: return "Expired";
+	case core::Verdict::WrongPin: return "Wrong pin code";
+	case core::Verdict::NotValid: return "Disabled";
+	case core::Verdict::ClockInvalid: return "Clock not set";
+	case core::Verdict::KeypadLocked: return "Keypad locked";
+	case core::Verdict::NoPin: return "No PIN";
+	case core::Verdict::Busy: return "Busy";
+	default: return nullptr;
+	}
+}
+
+static void denyFeedback(Reader &r)
+{
+	ledAccessDeniedOn();
+	beeperAccessDenied();
+	readerBeep(r, core::BEEP_DENIED);
+}
+
+static void actOn(Reader &r, const core::ReaderResult &res)
+{
+	if (res.pinPrompt)
+	{
+		ledWaitingOn();
+		readerBeep(r, core::BEEP_KEY);
+	}
+	if (res.keyPressed)
+		ledWaitingOn();
+	if (res.verdict == core::Verdict::None)
+	{
+		if (res.timedOut && !anyReaderWaitingForPin())
+			ledWaitingOff();
+		return;
+	}
+	if (!anyReaderWaitingForPin())
+		ledWaitingOff();
+
+	int door = config.readers[r.index].door;
+	const char *dir = core::readerDirName(config.readers[r.index].direction);
+	char where[48 + sizeof(config.doorName[0])]; // no String temporaries per card (review 8 R4-10)
+	snprintf(where, sizeof(where), "reader %d%s%s%s", r.index + 1, dir ? " (" : "", dir ? dir : "", dir ? ")" : "");
+	if (door >= 0)
+		snprintf(where + strlen(where), sizeof(where) - strlen(where), " at %s", doorLabel(door));
+	String uid = res.shownUid.c_str();
+	String user = res.username.c_str();
+	bool singleDoor = door >= 0 || config.numRelays == 1;
+
+	if (res.granted())
+	{
+		bool admin = res.verdict == core::Verdict::Admin;
+		writeLatest(uid, user, res.acctype, ACCESS_GRANTED, door, dir);
+		int types[MAX_NUM_RELAYS];
+		for (int i = 0; i < MAX_NUM_RELAYS; i++)
+			types[i] = res.acctypes[i];
+		if (singleDoor)
+			mqttPublishAccess(deviceClock.epoch, "true", admin ? "Admin" : "Always", user, uid, door, dir);
+		else
+			mqttPublishAccess(deviceClock.epoch, "true", types, user, uid, dir);
+		if (admin)
+			beeperAdminAccess();
+		else
+			beeperValidAccess();
+		r.led.start(1, core::LED_GRANTED_MS, 0, uptimeMs());
+		readerBeep(r, admin ? core::BEEP_ADMIN : core::BEEP_GRANTED);
+		// a card only opens: a Continuous relay held open stays open
+		// (core::cardMayRequest)
+		core::RelayBankView bank = relayBank();
+		for (int i = 0; i < config.numRelays; i++)
+			if ((res.relayMask & (1u << i)) && core::relayHasPin(bank, i) && core::cardMayRequest(bank, i, digitalRead(bank.pin[i])))
+				activateRelay[i] = true;
+		if (admin)
+			doEnableWifi = true; // admin cards also re-enable WiFi
+	}
+	if (res.verdict == core::Verdict::WrongPin)
+	{
+		writeEvent("WARN", "rfid", "Wrong PIN", where + (res.keypadEntry ? "" : String(", card ") + uid));
+		if (res.lockoutStarted > 0)
+		{
+			storeLockLevel(pinLockKey(r.index).c_str(), res.lockoutStarted);
+			String data = String(where) + ": every PIN refused for " + String(res.lockoutStarted / 1000) + " s after " + core::PinLockout::MAX_FAILS + " wrong PINs";
+			writeEvent("WARN", "rfid", "Keypad locked out", data);
+			mqttPublishAlarm("rfid", "Keypad locked out", data);
+		}
+		if (res.pinOnlyLockoutStarted > 0)
+		{
+			storeLockLevel(PIN_ONLY_LOCK_KEY, res.pinOnlyLockoutStarted);
+			String data = String("every reader: PIN-only entries refused for ") + String(res.pinOnlyLockoutStarted / 1000) + " s after " + core::PinLockout::MAX_FAILS + " wrong PIN-only entries (cards and card+PIN still work)";
+			writeEvent("WARN", "rfid", "PIN-only locked out", data);
+			mqttPublishAlarm("rfid", "PIN-only locked out", data);
+		}
+	}
+	if (res.verdict == core::Verdict::NoPin)
+	{
+		writeEvent("WARN", "rfid", "Card refused: PIN required, user has no PIN", String(where) + ", card " + uid + " (" + user + ")");
+	}
+	if (res.verdict == core::Verdict::Busy)
+	{
+		// whether the card (or PIN) is valid could not be told: refused, but
+		// not counted as unknown or wrong
+		writeEvent("WARN", "rfid", "Card not checked: not enough memory, try again", where + (res.keypadEntry ? String(", keypad") : String(", card ") + uid));
+	}
+	if (const char *reason = deniedReason(res.verdict))
+	{
+		writeLatest(uid, user, res.acctype, ACCESS_DENIED, door, dir);
+		bool known = !res.keypadEntry && res.verdict != core::Verdict::Busy;
+		mqttPublishAccess(deviceClock.epoch, known ? "true" : "false", reason, user, uid, door, dir);
+		denyFeedback(r);
+	}
+	if (res.verdict == core::Verdict::Unknown)
+	{
+		writeEvent("WARN", "rfid", "Unknown rfid tag is scanned", uid + " " + res.type.c_str() + (door >= 0 ? String(" at ") + doorLabel(door) : String("")));
+		writeLatest(uid, "Unknown", core::ACC_UNKNOWN, ACCESS_DENIED, door, dir);
+		sendPiccScan(r, res, false);
+		mqttPublishAccess(deviceClock.epoch, "false", "Denied", "Unknown", uid, door, dir);
+		denyFeedback(r);
+		if (res.cardAlarmStarted > 0)
+		{
+			// an alarm only: valid cards still open (2026-10-16)
+			String data = String(where) + ": " + core::CardAlarm::MAX_FAILS + " unknown cards; valid cards still open (alarm quiet for " + String(res.cardAlarmStarted / 1000) + " s)";
+			writeEvent("WARN", "rfid", "Unknown cards at reader", data);
+			mqttPublishAlarm("rfid", "Unknown cards at reader", data);
+		}
+	}
+	else if (res.verdict != core::Verdict::Cancelled && res.verdict != core::Verdict::Busy && !res.keypadEntry)
+		sendPiccScan(r, res, true); // tells the web UI who used the reader
+}
+
+void rfidLoop()
+{
+	FirmwareUserIo io;
+	for (int i = 0; i < MAX_READERS; i++)
+	{
+		Reader &r = rfidReaders[i];
+		if (!config.readers[i].enabled)
+			continue;
+		uint64_t now = uptimeMs();
+		// polled even while cooling down: a frame sent meanwhile is dropped,
+		// not decoded later as a fresh scan
+		core::WiegandResult wg;
+		bool lost = false;
+		bool frame = r.wiegandPort >= 0 && pollWiegandPort(r.wiegandPort, config.removeParityBits, wg, &lost);
+		if (lost && r.session.cancel(now).verdict == core::Verdict::Cancelled)
+		{
+			// frames lost mid-PIN: what arrives is not what was typed, and
+			// deciding on it counted a wrong PIN toward the lockout (review 8 V4)
+			writeEvent("WARN", "rfid", "PIN entry cancelled: the controller was busy, try again", String("reader ") + (i + 1));
+			continue;
+		}
+		if (r.session.coolingDown(now))
+			continue;
+		core::CardRead card;
+		bool haveCard = false, haveKey = false;
+		uint32_t key = 0;
+		if (frame && wg.type >= WIEGANDTYPE_PICC24 && wg.type <= WIEGANDTYPE_PICC34)
+		{
+			card.uid = core::wiegandUid(wg.code, config.wiegandReadHex);
+			card.type = String(wg.type, DEC).c_str();
+			haveCard = r.session.acceptsCard(now);
+		}
+		else if (frame && (wg.type == WIEGANDTYPE_KEYPRESS4 || wg.type == WIEGANDTYPE_KEYPRESS8))
+		{
+			key = wg.code;
+			haveKey = true;
+		}
+		core::ReaderSettings s;
+		s.pinRequired = config.pinCodeRequested;
+		s.pinOnly = config.pinCodeOnly;
+		s.door = config.readers[i].door;
+		s.numRelays = config.numRelays;
+		s.pinOnlyLockout = &pinOnlyLockout;
+		core::ReaderResult res = r.session.step(io, s, now, haveCard ? &card : nullptr, haveKey ? &key : nullptr);
+		actOn(r, res);
+	}
+	// the bucket drained empty since the last lockout: the next one is short again
+	for (int i = 0; i < MAX_READERS; i++)
+	{
+		if (rfidReaders[i].session.pinLockout().expire(uptimeMs()))
+			storeLockLevel(pinLockKey(i).c_str(), 0);
+		rfidReaders[i].session.cardAlarm().expire(uptimeMs());
+	}
+	if (pinOnlyLockout.expire(uptimeMs()))
+		storeLockLevel(PIN_ONLY_LOCK_KEY, 0);
+	readerFeedbackLoop();
+}
+
+// A reader's Wiegand port (both readers are Wiegand).
+void setupWiegandReader(int reader, uint8_t d0, uint8_t d1)
+{
+	Reader &r = rfidReaders[reader];
+	r.index = reader;
+	if (setupWiegandPort(reader, d0, d1))
+	{
+		r.wiegandPort = reader;
+		config.readers[reader].enabled = true;
+	}
+	else
+	{
+		writeEvent("WARN", "rfid", "Wiegand reader not started: check D0/D1 pins", String("reader ") + (reader + 1));
+	}
+	setupReaderFeedbackPins(reader);
+}

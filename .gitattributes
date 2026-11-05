@@ -1,0 +1,3 @@
+src/webh/* linguist-vendored
+
+*.esp linguist-language=C++

@@ -1,0 +1,108 @@
+<template id="mqttcontent">
+<div class="set-page set-mqtt">
+    <div class="pagehead">
+        <h1>MQTT</h1>
+        <p>Send access events to an MQTT broker, for Home Assistant or your own automations.</p>
+    </div>
+
+    <section class="card">
+        <h2>Broker</h2>
+        <div class="field">
+            <div class="label" id="mqttEnabled-l">MQTT<button type="button" class="help" aria-describedby="mqttEnabled-l" data-content="Enabled: the reader connects to the broker below and publishes access events, its status and (if chosen) its event log." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+            <div class="segmented" role="radiogroup" aria-labelledby="mqttEnabled-l">
+                <label><input type="radio" value="1" name="mqttEnabled" data-onchange="mqttEnabledChanged">Enabled</label>
+                <label><input type="radio" value="0" name="mqttEnabled" data-onchange="mqttEnabledChanged" checked>Disabled</label>
+            </div>
+            <div class="hint" id="mqttoffnote" hidden>MQTT is off: the settings below are kept but not used.</div>
+        </div>
+        <div class="set-mqttbody">
+            <div class="set-hostport">
+                <div class="field">
+                    <div class="labelrow"><label for="mqtthost" id="lbl-mqtthost">Broker address</label><button type="button" class="help" aria-describedby="lbl-mqtthost" data-content="The broker's IP address or host name, for example 192.168.1.10 or broker.example.com (without mqtt://). A host name needs a DNS server (Wireless Network)." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <input placeholder="192.168.1.10" id="mqtthost" type="text" maxlength="127" autocomplete="off" autocapitalize="off" spellcheck="false">
+                </div>
+                <div class="field">
+                    <div class="labelrow"><label for="mqttport" id="lbl-mqttport">Port</label><button type="button" class="help" aria-describedby="lbl-mqttport" data-content="Usually 1883." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <input placeholder="1883" value="" id="mqttport" type="number" inputmode="numeric" min="1" max="65535" step="1">
+                </div>
+            </div>
+            <div class="grid2">
+                <div class="field">
+                    <div class="labelrow"><label for="mqttuser" id="lbl-mqttuser">User</label><button type="button" class="help" aria-describedby="lbl-mqttuser" data-content="The broker's user name; empty if the broker needs none." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <input placeholder="" value="" id="mqttuser" type="text" maxlength="63" autocomplete="off" autocapitalize="off" spellcheck="false">
+                </div>
+                <div class="field">
+                    <div class="labelrow"><label for="mqttpwd" id="lbl-mqttpwd">Password</label><button type="button" class="help" aria-describedby="lbl-mqttpwd" data-content="The broker's password for that user; empty if it needs none." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <div class="set-inline">
+                        <input placeholder="" value="" id="mqttpwd" type="password" maxlength="127" autocomplete="new-password" autocapitalize="off" spellcheck="false" data-oninput="mqttHints">
+                        <button type="button" class="btn set-reveal" data-onclick="spReveal" data-arg="mqttpwd" aria-controls="mqttpwd" aria-pressed="false">Show</button>
+                    </div>
+                    <div class="hint" id="mqttpwd-kept" hidden>The saved password is kept. Type a new one to change it.</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="card set-mqttbody">
+        <h2>Topics</h2>
+        <div class="field">
+            <div class="labelrow"><label for="mqtttopic" id="lbl-mqtttopic">Topic prefix</label><button type="button" class="help" aria-describedby="lbl-mqtttopic" data-content="The start of every topic the reader uses, for example /rfid: it sends its messages to /rfid/send and listens for commands on /rfid/cmd. Readers that work together usually share one prefix." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+            <input placeholder="/rfid" value="" id="mqtttopic" type="text" maxlength="120" autocomplete="off" autocapitalize="off" spellcheck="false" data-oninput="mqttHints">
+        </div>
+        <div class="field">
+            <div class="labelrow"><label class="switch" for="mqttautotopic" id="lbl-mqttautotopic"><span>Auto topic</span><input type="checkbox" id="mqttautotopic" data-onchange="mqttHints"></label><button type="button" class="help" aria-describedby="lbl-mqttautotopic" data-content="Adds a dash and the last 6 hex digits of the reader's hotspot MAC address to the prefix, for example door becomes door-a1b2c3. Useful when several readers share one prefix." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+            <div class="hint" id="topicpreview"></div>
+        </div>
+        <div class="field">
+            <div class="labelrow"><label for="syncrate" id="lbl-syncrate">Sync Time (seconds)</label><button type="button" class="help" aria-describedby="lbl-syncrate" data-content="How often the reader publishes its heartbeat (status) to the broker. 180 seconds is the default." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+            <input placeholder="180" value="" id="syncrate" type="number" inputmode="numeric" min="1" step="1">
+        </div>
+    </section>
+
+    <section class="card set-mqttbody">
+        <h2>Features</h2>
+        <div class="field">
+            <div class="label" id="mqttlog-l">MQTT logging<button type="button" class="help" aria-describedby="mqttlog-l" data-content="Send events over MQTT instead of writing them to the Event Log on flash. While the broker cannot be reached they are written to the Event Log, so none are lost (unless Logging is disabled on the Log Settings page). The Access Log is still written on the device." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+            <div class="segmented" role="radiogroup" aria-labelledby="mqttlog-l">
+                <label><input type="radio" value="1" name="mqttlog">Enabled</label>
+                <label><input type="radio" value="0" name="mqttlog" checked>Disabled</label>
+            </div>
+        </div>
+        <div class="field">
+            <div class="label" id="mqttha-l">MQTT for Home Assistant<button type="button" class="help" aria-describedby="mqttha-l" data-content="Publishes Home Assistant discovery topics, so the reader, its doors and its sensors appear in Home Assistant by themselves." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+            <div class="segmented" role="radiogroup" aria-labelledby="mqttha-l">
+                <label><input type="radio" value="1" name="mqttha">Enabled</label>
+                <label><input type="radio" value="0" name="mqttha" checked>Disabled</label>
+            </div>
+        </div>
+        <div class="field">
+            <div class="labelrow"><label for="mqttcarduid" id="lbl-mqttcarduid">Card number in MQTT</label><button type="button" class="help" aria-describedby="lbl-mqttcarduid" data-content="How access messages show the card number (uid). A full card number is all someone needs to clone the card, and everyone who can read the topic sees it. Last 4: ****1234. Off: no uid in the message. Home Assistant automations that match the full number need Full. Keypad entries show keypad. The remote-admin user list is not affected." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+            <select id="mqttcarduid" data-onchange="mqttHints"><option value="1">Last 4</option><option value="2">Full</option><option value="0">Off</option></select>
+            <div class="hint" id="carduidhint"></div>
+        </div>
+
+        <h3 class="subhead">Control over MQTT</h3>
+        <div class="field">
+            <div class="label" id="mqttremoteadmin-l">MQTT remote admin<button type="button" class="help" aria-describedby="mqttremoteadmin-l" data-content="Allow adduser, deletuid, deletusers, getuserlist, deletlog, getconf and updateconf over MQTT. Anyone who can publish to the command topic gets these powers, so only enable it with broker ACLs in place. It cannot add admin cards, and updateconf cannot change the Wi-Fi, the passwords, the broker or topic, remote admin, door control, the PIN rules, readers, relays, locks or pins (README-MQTT). Door commands are a separate setting (MQTT door control)." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+            <div class="segmented" role="radiogroup" aria-labelledby="mqttremoteadmin-l">
+                <label><input type="radio" value="1" name="mqttremoteadmin" data-onchange="mqttHints">Enabled</label>
+                <label><input type="radio" value="0" name="mqttremoteadmin" data-onchange="mqttHints" checked>Disabled</label>
+            </div>
+            <div id="remoteadminwarn" class="banner warning set-fieldbanner" hidden><svg class="icon"><use href="#i-alert"/></svg><div>Anyone who can publish to the command topic can add and delete users. Use broker authentication and ACLs.</div></div>
+        </div>
+        <div class="field">
+            <div class="label" id="mqttdoorcontrol-l">MQTT door control<button type="button" class="help" aria-describedby="mqttdoorcontrol-l" data-content="Allow open, opendoor and close over MQTT (and the lock entities in Home Assistant). Anyone who can publish to the command topic can then open the doors: the only other check is the device's IP, which it publishes itself. Only enable it with broker authentication and ACLs. Disabled: these commands are ignored." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+            <div class="segmented" role="radiogroup" aria-labelledby="mqttdoorcontrol-l">
+                <label><input type="radio" value="1" name="mqttdoorcontrol" data-onchange="mqttHints">Enabled</label>
+                <label><input type="radio" value="0" name="mqttdoorcontrol" data-onchange="mqttHints" checked>Disabled</label>
+            </div>
+            <div id="doorcontrolwarn" class="banner danger set-fieldbanner" hidden><svg class="icon"><use href="#i-alert"/></svg><div>Anyone who can publish to the command topic can open the doors. Only with broker authentication and ACLs.</div></div>
+        </div>
+    </section>
+
+    <div class="actions set-save">
+        <p class="muted small">Save shows what changes for you to confirm; nothing is stored on the reader until you do.</p>
+        <button type="button" data-onclick="savePage" data-arg="mqtt" class="btn primary">Save</button>
+    </div>
+</div>
+</template>

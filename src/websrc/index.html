@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <link href="favicon.svg" rel="icon" type="image/svg+xml">
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+    <meta name="theme-color" content="#0a1929">
+    <title>Ironframe RFID</title>
+    <link href="css/required.css" rel="stylesheet">
+</head>
+
+<body>
+    <!-- Icons: paths from Feather (MIT, feathericons.com), used with <svg class="icon"><use href="#i-..."/></svg> -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+        <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></symbol>
+        <symbol id="i-users" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+        <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+        <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+        <symbol id="i-menu" viewBox="0 0 24 24"><path d="M3 12h18M3 6h18M3 18h18"/></symbol>
+        <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></symbol>
+        <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/></symbol>
+        <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></symbol>
+        <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+        <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+        <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+        <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></symbol>
+        <symbol id="i-archive" viewBox="0 0 24 24"><path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/></symbol>
+        <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></symbol>
+        <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></symbol>
+        <symbol id="i-key" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></symbol>
+        <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></symbol>
+        <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01"/></symbol>
+        <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+        <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
+        <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+        <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></symbol>
+        <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></symbol>
+        <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+        <symbol id="i-door" viewBox="0 0 24 24"><path d="M4 22V3a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v19M2 22h20M15 12h.01"/></symbol>
+        <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></symbol>
+    </svg>
+
+    <header class="appbar">
+        <button type="button" id="sidebarCollapse" class="iconbtn" aria-label="Menu"><svg class="icon"><use href="#i-menu"/></svg></button>
+        <div class="if-brand">
+            <img src="img/ironframe-logo.svg" alt="">
+            <div class="if-wordmark">IRON<span>FRAME</span></div>
+        </div>
+        <div class="title" id="pagetitle">Status</div>
+        <div id="ws-connection-status" class="conn" role="status" hidden>Reconnecting&hellip;</div>
+    </header>
+
+    <!-- the menu: a drawer on phones, a fixed sidebar on wide screens -->
+    <nav id="sidebar" aria-label="Main menu">
+        <div class="side-head">
+            <div class="if-brand">
+                <img src="img/ironframe-logo.svg" alt="Ironframe logo">
+                <div>
+                    <div class="if-wordmark">IRON<span>FRAME</span></div>
+                    <div class="if-product">RFID Access</div>
+                </div>
+            </div>
+            <button type="button" id="dismiss" class="iconbtn" aria-label="Close menu"><svg class="icon"><use href="#i-x"/></svg></button>
+        </div>
+        <div id="systemname"></div>
+        <div class="navgroup">
+            <a href="#" id="status" class="navlink active"><svg class="icon"><use href="#i-home"/></svg>Status</a>
+            <a href="#" id="users" class="navlink"><svg class="icon"><use href="#i-users"/></svg>Users</a>
+            <a href="#" id="latestlog" class="navlink"><svg class="icon"><use href="#i-list"/></svg>Access Log</a>
+            <a href="#" id="eventlog" class="navlink"><svg class="icon"><use href="#i-activity"/></svg>Event Log</a>
+        </div>
+        <div class="navgroup">
+            <h4>Settings</h4>
+            <a href="#" id="network" class="navlink"><svg class="icon"><use href="#i-wifi"/></svg>Wireless Network</a>
+            <a href="#" id="hardware" class="navlink"><svg class="icon"><use href="#i-cpu"/></svg>Doors &amp; Readers</a>
+            <a href="#" id="general" class="navlink"><svg class="icon"><use href="#i-sliders"/></svg>General</a>
+            <a href="#" id="mqtt" class="navlink"><svg class="icon"><use href="#i-link"/></svg>MQTT</a>
+            <a href="#" id="ntp" class="navlink"><svg class="icon"><use href="#i-clock"/></svg>Time</a>
+        </div>
+        <div class="navgroup">
+            <h4>Maintenance</h4>
+            <a href="#" id="logmaintenance" class="navlink"><svg class="icon"><use href="#i-file"/></svg>Log Settings</a>
+            <a href="#" id="backup" class="navlink"><svg class="icon"><use href="#i-archive"/></svg>Backup &amp; Restore</a>
+            <a href="#" id="updatelink" class="navlink"><svg class="icon"><use href="#i-upload"/></svg>Update Firmware</a>
+            <a href="#" id="reset" class="navlink danger"><svg class="icon"><use href="#i-rotate"/></svg>Factory Reset</a>
+        </div>
+        <div class="navgroup">
+            <a href="#" id="changepasslink" class="navlink"><svg class="icon"><use href="#i-key"/></svg>Change Password</a>
+            <a href="#" class="navlink" data-onclick="logout"><svg class="icon"><use href="#i-logout"/></svg>Sign Out</a>
+        </div>
+        <div id="mainver"></div>
+    </nav>
+    <div class="overlay"></div>
+
+    <main id="content">
+        <div id="ajaxcontent"></div>
+    </main>
+    <div id="msgarea" aria-live="polite"></div>
+
+    <!-- phones: the four places used most -->
+    <nav class="tabbar" aria-label="Quick menu">
+        <a href="#" data-onclick="showPage" data-arg="status" data-tab="status" class="active"><svg class="icon"><use href="#i-home"/></svg>Status</a>
+        <a href="#" data-onclick="showPage" data-arg="users" data-tab="users"><svg class="icon"><use href="#i-users"/></svg>Users</a>
+        <a href="#" data-onclick="showPage" data-arg="latestlog" data-tab="latestlog"><svg class="icon"><use href="#i-list"/></svg>Access Log</a>
+        <button type="button" data-onclick="openMenu"><svg class="icon"><use href="#i-menu"/></svg>More</button>
+    </nav>
+
+    <!-- Shown only when there are unsaved settings: the bar to review and save them -->
+    <div class="savebar footer" hidden>
+        <div id="commit" class="spacer"></div>
+    </div>
+
+    <dialog id="reviewmodal" aria-labelledby="reviewtitle">
+        <div class="dlg-head">
+            <h2 id="reviewtitle">Unsaved changes</h2>
+            <button type="button" class="iconbtn" data-close aria-label="Close"><svg class="icon"><use href="#i-x"/></svg></button>
+        </div>
+        <div class="dlg-body">
+            <ul id="changelist"></ul>
+            <div id="reviewproblem" class="banner danger" hidden></div>
+            <div id="reviewcardwarn" class="banner warning" hidden></div>
+            <p class="muted small" id="reviewnote">Save &amp; Reboot stores these settings and restarts the reader.</p>
+        </div>
+        <div class="dlg-foot">
+            <button type="button" class="btn" data-close>Cancel</button>
+            <button type="button" id="savereboot" data-onclick="commit" class="btn primary">Save &amp; Reboot</button>
+        </div>
+    </dialog>
+
+    <!-- progress of Save & Reboot, firmware update, restart and reset: over the app, which stays until the device accepts -->
+    <dialog id="progressmodal" data-static aria-labelledby="progresstitle">
+        <div class="dlg-head"><h2 id="progresstitle">Please wait&hellip;</h2></div>
+        <div class="dlg-body">
+            <div class="progress-label" id="updateproglabel">0%</div>
+            <div class="progress"><div id="updateprog" class="bar busy" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div></div>
+            <p id="progressmsg" role="status"></p>
+        </div>
+        <div class="dlg-foot">
+            <div id="reconnect" class="spacer" hidden></div>
+            <button type="button" id="progressclose" class="btn" data-close hidden>Close</button>
+        </div>
+    </dialog>
+
+    <dialog id="confirmmodal">
+        <div class="dlg-body" style="padding-top:20px">
+            <p id="confirmtext"></p>
+        </div>
+        <div class="dlg-foot">
+            <button type="button" class="btn" data-close>Cancel</button>
+            <button type="button" id="confirmok" class="btn solid-danger">OK</button>
+        </div>
+    </dialog>
+
+    <dialog id="destroy" aria-labelledby="destroytitle">
+        <div class="dlg-head">
+            <h2 id="destroytitle">Factory reset</h2>
+            <button type="button" class="iconbtn" data-close aria-label="Close"><svg class="icon"><use href="#i-x"/></svg></button>
+        </div>
+        <div class="dlg-body">
+            <div class="banner danger"><svg class="icon"><use href="#i-alert"/></svg><div>This <strong>cannot</strong> be undone.</div></div>
+            <p>It permanently deletes <strong>all users, settings and logs</strong>, and the exit-button settings kept for power-up: the exit buttons stop opening their doors until the board is set up again. The relays stay locked at power-up. Make a backup first.</p>
+            <div class="field">
+                <label for="compare">Type the device's hostname to confirm</label>
+                <input type="text" id="compare" autocomplete="off" autocapitalize="off" spellcheck="false" data-oninput="compareDestroy">
+            </div>
+        </div>
+        <div class="dlg-foot">
+            <button id="destroybtn" type="button" disabled data-onclick="destroy" class="btn solid-danger block">Erase everything</button>
+        </div>
+    </dialog>
+
+    <dialog id="signin" class="fullscreen-login" data-static aria-label="Sign in">
+        <div class="login-wrap">
+            <div class="login-brand">
+                <img src="img/ironframe-logo.svg" alt="Ironframe logo">
+                <div class="if-wordmark">IRON<span>FRAME</span></div>
+                <div class="if-product">RFID Access Control</div>
+            </div>
+            <form class="card login-card" data-onsubmit="login">
+                <div id="loginnotice" class="banner info" role="status" hidden></div>
+                <div class="field">
+                    <label for="password">Admin password</label>
+                    <input id="password" placeholder="Password" name="password" type="password" value="" required autocomplete="current-password" title="Please enter your password">
+                </div>
+                <div id="loginerror" class="banner danger" role="alert" hidden></div>
+                <button type="submit" class="btn primary block">Sign In</button>
+            </form>
+        </div>
+    </dialog>
+
+    <dialog id="leavedlg" aria-labelledby="leavetitle">
+        <div class="dlg-head">
+            <h2 id="leavetitle">Leave this page?</h2>
+        </div>
+        <div class="dlg-body">
+            <p>This page has changes that are not saved yet. To keep them, press <b>Save</b> on the page and confirm the changes it shows.</p>
+            <div class="dlg-foot">
+                <button type="button" class="btn" data-onclick="leaveGo">Leave without them</button>
+                <button type="button" class="btn primary" data-onclick="leaveStay">Stay</button>
+            </div>
+        </div>
+    </dialog>
+
+    <dialog id="stepupdlg" aria-labelledby="stepuptitle">
+        <div class="dlg-head">
+            <h2 id="stepuptitle">Confirm the admin password</h2>
+        </div>
+        <form class="dlg-body" data-onsubmit="stepUpSubmit">
+            <p>Opening a door from this page, a restart, an update or factory reset, adding users, admin access and PINs, clearing the logs, setting the clock and changes to the network, MQTT or Doors &amp; Readers settings need the admin password, not just this signed-in page.</p>
+            <div class="field">
+                <label for="stepuppass">Admin password</label>
+                <input id="stepuppass" type="password" required autocomplete="current-password">
+            </div>
+            <div class="dlg-foot">
+                <button type="button" class="btn" data-onclick="stepUpCancel">Cancel</button>
+                <button type="submit" class="btn primary">Confirm</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog id="changepass" aria-labelledby="changepasstitle">
+        <div class="dlg-head">
+            <h2 id="changepasstitle">Change admin password</h2>
+            <button type="button" class="iconbtn" data-close id="changepassclose" aria-label="Close"><svg class="icon"><use href="#i-x"/></svg></button>
+        </div>
+        <form class="dlg-body" data-onsubmit="changePassword">
+            <div id="changepassforced" class="banner warning" hidden>
+                <svg class="icon"><use href="#i-alert"/></svg><div>This reader still uses the factory password <code>admin</code>. Set a new one before continuing.</div>
+            </div>
+            <div class="field" id="currentpassgroup">
+                <label for="currentpass">Current password</label>
+                <input id="currentpass" type="password" maxlength="64" autocomplete="current-password">
+            </div>
+            <div class="field">
+                <label for="newpass1">New password</label>
+                <input id="newpass1" type="password" minlength="8" maxlength="64" required autocomplete="new-password">
+                <div class="hint">8 to 64 characters.</div>
+            </div>
+            <div class="field">
+                <label for="newpass2">Repeat new password</label>
+                <input id="newpass2" type="password" minlength="8" maxlength="64" required autocomplete="new-password">
+            </div>
+            <div id="changepasserror" class="banner danger" role="alert" hidden></div>
+            <div class="actions" style="padding-bottom:16px">
+                <button type="submit" class="btn primary">Set Password</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog id="update" aria-labelledby="updatetitle">
+        <div class="dlg-head">
+            <h2 id="updatetitle">Update firmware</h2>
+            <button type="button" class="iconbtn" data-close aria-label="Close"><svg class="icon"><use href="#i-x"/></svg></button>
+        </div>
+        <div class="dlg-body">
+            <div class="banner warning"><svg class="icon"><use href="#i-alert"/></svg><div>Make a backup first.</div></div>
+            <div class="hint" id="updatemaglock" hidden></div>
+            <p>Upload an Ironframe RFID <span id="upchip">ESP32-S3</span> firmware image (<code id="upfile">esp32s3.bin</code>, not the <code>-full-flash</code> / <code>-full</code> image). Upstream esp-rfid releases are ESP8266 builds and will not run on this board.</p>
+            <dl class="kv"><div><dt>Current version</dt><dd id="versionhead"></dd></div></dl>
+            <div class="field" style="margin-top:12px">
+                <input id="binform" data-onchange="allowUpload" type="file" name="update" accept=".bin">
+            </div>
+            <p id="upcheck" class="text-danger" hidden></p>
+        </div>
+        <div class="dlg-foot">
+            <button type="button" class="btn" data-close>Cancel</button>
+            <button type="button" data-onclick="upload" class="btn primary" id="upbtn" disabled>Update</button>
+        </div>
+    </dialog>
+
+    <script src="js/esprfid.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,524 @@
+// Persistence: NVS (namespace "ironframe") and the atomic JSON files on
+// LittleFS. Everything that reads or writes either lives here.
+
+/*
+ * NVS
+ */
+static const char *NVS_NS = "ironframe";
+
+bool commissionedState()
+{
+	Preferences prefs;
+	if (!prefs.begin(NVS_NS, true))
+		return false;
+	bool value = prefs.getBool("commissioned", false);
+	prefs.end();
+	return value;
+}
+
+// A password chosen before the first configuration save. There is no
+// /config.json to hold it yet, so it waits in NVS: otherwise any restart
+// before that save silently brings back the factory password. Only its
+// Digest HA1 is kept ("adminha1"); up to 1.4.1 the password itself was
+// ("adminpw"), which is hashed and removed here the first time it is read.
+bool pendingAdminHa1(char out[core::HA1_HEX + 1])
+{
+	Preferences prefs;
+	if (!prefs.begin(NVS_NS, false))
+		return false;
+	bool found = false;
+	String ha1 = prefs.isKey("adminha1") ? prefs.getString("adminha1", "") : String();
+	if (core::isHa1(ha1.c_str()))
+	{
+		strcpy(out, ha1.c_str());
+		found = true;
+	}
+	else if (prefs.isKey("adminpw"))
+	{
+		String plain = prefs.getString("adminpw", "");
+		if (core::isAcceptableAdminPassword(plain.c_str()))
+		{
+			core::adminHa1(plain.c_str(), out);
+			found = prefs.putString("adminha1", out) == core::HA1_HEX;
+		}
+		if (found || !core::isAcceptableAdminPassword(plain.c_str()))
+			prefs.remove("adminpw");
+		if (found)
+			writeEvent("INFO", "sys", "Admin password now stored as a digest hash", "pending password in NVS");
+	}
+	prefs.end();
+	return found;
+}
+
+static bool storePendingAdminHa1(const char *ha1)
+{
+	Preferences prefs;
+	if (!prefs.begin(NVS_NS, false))
+		return false;
+	bool ok = prefs.putString("adminha1", ha1) == strlen(ha1);
+	if (ok && prefs.isKey("adminpw"))
+		prefs.remove("adminpw");
+	prefs.end();
+	return ok;
+}
+
+void clearPendingAdminPassword()
+{
+	Preferences prefs;
+	if (!prefs.begin(NVS_NS, false))
+		return;
+	if (prefs.isKey("adminha1"))
+		prefs.remove("adminha1");
+	if (prefs.isKey("adminpw"))
+		prefs.remove("adminpw");
+	prefs.end();
+}
+
+void setCommissionedState(bool commissioned)
+{
+	Preferences prefs;
+	if (!prefs.begin(NVS_NS, false))
+		return;
+	bool current = prefs.getBool("commissioned", false);
+	if (commissioned && !current)
+		prefs.putBool("commissioned", true);
+	else if (!commissioned && current)
+		prefs.remove("commissioned");
+	prefs.end();
+}
+
+// Back to an unconfigured device: the commissioned flag, a pending admin
+// password and the lockouts; a factory reset also the exit-button boot
+// copy, which BOOT-hold recovery keeps. Both keep the relays' locked levels
+// (core::clearResetNvsKeys).
+static void clearCommissioning(core::ResetKind kind)
+{
+	Preferences prefs;
+	if (prefs.begin(NVS_NS, false))
+	{
+		core::clearResetNvsKeys(prefs, kind);
+		prefs.end();
+	}
+}
+
+// *noMemory (if given): false came from a lack of memory, not from a
+// missing or unreadable file.
+bool readJsonFileRecover(const char *path, JsonDocument &doc, bool *noMemory)
+{
+	auto readOne = [&](const char *name) {
+		File f = LittleFS.open(name, "r");
+		if (!f) return core::JsonRead::Missing;
+		doc.clear();
+		auto error = deserializeJson(doc, f);
+		f.close();
+		if (error == DeserializationError::NoMemory)
+			return core::JsonRead::NoMemory;
+		return error ? core::JsonRead::Corrupt : core::JsonRead::Ok;
+	};
+	String current(path), backup = current + ".bak";
+	bool keepBackup = current == "/config.json";
+	LittleFSAdapter fsa;
+	core::JsonRead first;
+	core::JsonRecover r = core::readJsonRecover(fsa, current.c_str(), backup.c_str(), keepBackup, readOne, &first);
+	if (noMemory)
+		*noMemory = r == core::JsonRecover::NoMemory;
+	if (r == core::JsonRecover::NoMemory)
+	{
+		// the files are left as they are: the next read may well succeed
+		writeEvent("WARN", "sys", "Not enough memory to read " + current, String(ESP.getMaxAllocHeap()) + " bytes largest free block");
+		return false;
+	}
+	// The settings in force are now the previous ones: say so, the change
+	// that was saved last may be missing.
+	if (r == core::JsonRecover::Recovered && keepBackup)
+		writeEvent("WARN", "sys", first == core::JsonRead::Corrupt ? "config.json was unreadable: restored the previous settings from config.json.bak"
+															   : "config.json was missing: restored the previous settings from config.json.bak",
+				   "check the settings");
+	return r == core::JsonRecover::Read || r == core::JsonRecover::Recovered;
+}
+
+// The users in RAM for the lists (core/userindex.h).
+core::UserIndex userIndex;
+
+// The uid of a user file path ("/P/<uid>"), or nullptr.
+static const char *userFileUid(const char *path)
+{
+	return strncmp(path, "/P/", 3) == 0 && core::isValidUid(path + 3) ? path + 3 : nullptr;
+}
+
+bool writeJsonFileAtomic(const char *path, JsonDocument &doc)
+{
+	String current(path), temporary = current + ".tmp", backup = current + ".bak";
+	bool keepBackup = current == "/config.json";
+	size_t bytes = measureJson(doc);
+	if (!core::atomicWriteFits(fsFreeBytes(), bytes) && !core::atomicWriteFits(fsFreeBytes(true), bytes))
+		return false; // a full LittleFS crashes instead of failing (core/storagespace.h)
+	fsFree.spent(2 * bytes); // the temporary copy, then the backup or the replaced file
+	LittleFS.remove(temporary);
+	File f = LittleFS.open(temporary, "w");
+	if (!f) return false;
+	size_t expected = measureJson(doc);
+	size_t written = serializeJson(doc, f);
+	f.flush();
+	f.close();
+	if (expected == 0 || written != expected)
+	{
+		LittleFS.remove(temporary);
+		return false;
+	}
+	File probe = LittleFS.open(temporary, "r");
+	if (!probe || probe.size() != expected)
+	{
+		if (probe) probe.close();
+		LittleFS.remove(temporary);
+		return false;
+	}
+	DynamicJsonDocument verify(expected + 1024);
+	auto error = deserializeJson(verify, probe);
+	probe.close();
+	if (error)
+	{
+		LittleFS.remove(temporary);
+		return false;
+	}
+	LittleFS.remove(backup);
+	bool hadCurrent = LittleFS.exists(current);
+	if (hadCurrent && !LittleFS.rename(current, backup))
+	{
+		LittleFS.remove(temporary);
+		return false;
+	}
+	if (!LittleFS.rename(temporary, current))
+	{
+		if (hadCurrent) LittleFS.rename(backup, current);
+		return false;
+	}
+	if (!keepBackup) LittleFS.remove(backup);
+	if (const char *uid = userFileUid(path))
+		userIndex.put(uid, doc.as<JsonObjectConst>());
+	return true;
+}
+
+// see core::removeUserFiles: false if the user is still on flash
+bool removeUserFiles(const char *uid)
+{
+	bool gone = core::removeUserFiles(LittleFS, uid);
+	if (gone)
+		userIndex.erase(uid);
+	return gone;
+}
+
+// Boot: drop unfinished writes (<uid>.tmp) and settle every <uid>.bak the
+// way a swipe would (kept as the record if the record is missing or
+// unreadable, otherwise removed), so the user list matches what opens.
+// The next file name in an open directory, without opening the file: the
+// base name into out, false at the end. File::openNextFile() opens every
+// file, and LittleFS finds a file by name by scanning the directory, so a
+// walk of /P was quadratic: 776 users took 136 s at boot (no card opened
+// meanwhile), names only 1.2 s (bench 2026-10-18, ledger H27).
+bool nextFileName(File &dir, String &out, bool &isDir)
+{
+	String path = dir.getNextFileName(&isDir);
+	if (path.length() == 0)
+		return false;
+	int slash = path.lastIndexOf('/');
+	out = slash < 0 ? path : path.substring(slash + 1);
+	return true;
+}
+
+// Users stored: valid uids in /P, by name (a .bak or .tmp is not a user).
+size_t countUsers()
+{
+	size_t n = 0;
+	File dir = LittleFS.open("/P");
+	if (!dir || !dir.isDirectory())
+		return 0;
+	String name;
+	bool isDir = false;
+	while (nextFileName(dir, name, isDir))
+		if (!isDir && core::isValidUid(name.c_str()))
+			n++;
+	dir.close();
+	return n;
+}
+
+// Users stored, for the 200-user limit: from RAM once the index is built
+// (countUsers() walks the folder, about 0.3 s with 200 users).
+size_t storedUserCount()
+{
+	return userIndex.ready() ? userIndex.size() : countUsers();
+}
+
+// core::UserIndex::buildStep over /P: names only, one record read a step.
+struct UserIndexIo
+{
+	File dir;
+	bool nextUid(std::string &uid)
+	{
+		String name;
+		bool isDir = false;
+		while (nextFileName(dir, name, isDir))
+			if (!isDir && core::isValidUid(name.c_str()))
+			{
+				uid = name.c_str();
+				return true;
+			}
+		return false;
+	}
+	bool read(const char *uid, JsonDocument &doc)
+	{
+		File f = LittleFS.open(String("/P/") + uid, "r");
+		if (!f)
+			return false;
+		bool ok = !deserializeJson(doc, f);
+		f.close();
+		return ok;
+	}
+};
+
+// Builds userIndex after start-up (or after every user was deleted), one
+// user file per loop() pass, so the start and the cards are not held up.
+// A folder walk that meets a change can miss a name: the result is checked
+// against a count of the names and built again, at most three times; after
+// that the lists keep reading the files (a user file that cannot be read is
+// left out of the index but counted, so this can happen).
+void userIndexLoop()
+{
+	static UserIndexIo io;
+	static bool building = false;
+	static int tries = 0;
+	if (userIndex.ready() || tries >= 3)
+		return;
+	if (!building)
+	{
+		io.dir = LittleFS.open("/P");
+		if (!io.dir || !io.dir.isDirectory())
+		{
+			userIndex.setReady(); // no folder: no users
+			return;
+		}
+		building = true;
+	}
+	DynamicJsonDocument doc(1024);
+	if (userIndex.buildStep(io, doc))
+		return;
+	io.dir.close();
+	building = false;
+	size_t files = countUsers();
+	if (userIndex.size() == files)
+		return;
+	size_t indexed = userIndex.size();
+	tries++;
+	userIndex.clear();
+	if (tries >= 3)
+		writeEvent("WARN", "sys", "User list kept on flash only", String(files) + " user files, " + String(indexed) + " readable: the Users page reads the files (slower)");
+}
+
+// Every user deleted: the index starts again (empty, so quickly ready).
+void userIndexReset()
+{
+	userIndex.clear();
+}
+
+void sweepUserFiles()
+{
+	std::vector<String> temps, backups;
+	File dir = LittleFS.open("/P");
+	if (!dir || !dir.isDirectory())
+		return;
+	String name;
+	bool isDir = false;
+	while (nextFileName(dir, name, isDir))
+	{
+		char base[core::MAX_UID_LEN + 1];
+		core::UserFileKind kind = isDir ? core::UserFileKind::Other : core::classifyUserFile(name.c_str(), base, sizeof(base));
+		if (kind == core::UserFileKind::Temp)
+			temps.push_back(String("/P/") + name);
+		else if (kind == core::UserFileKind::Backup)
+			backups.push_back(String("/P/") + base);
+		esp_task_wdt_reset();
+	}
+	dir.close();
+	for (String &t : temps)
+		LittleFS.remove(t);
+	DynamicJsonDocument doc(1024);
+	for (String &b : backups)
+	{
+		readJsonFileRecover(b.c_str(), doc);
+		esp_task_wdt_reset();
+	}
+	if (!temps.empty() || !backups.empty())
+		writeEvent("INFO", "sys", "User files tidied at boot", String(temps.size()) + " unfinished, " + backups.size() + " backup");
+}
+
+// A format in progress (system.esp: a boot that finds it finishes it), and
+// which kind, so a finished BOOT-hold recovery still keeps the boot copies:
+// 0 none, 1 recovery (also what 1.4.1 and older stored, a bool), 2 factory.
+static uint8_t factoryResetPending()
+{
+	Preferences prefs;
+	if (!prefs.begin(NVS_NS, true))
+		return 0;
+	uint8_t pending = prefs.isKey("resetpending") ? prefs.getUChar("resetpending", 0) : 0;
+	prefs.end();
+	return pending;
+}
+
+static void setFactoryResetPending(uint8_t pending)
+{
+	Preferences prefs;
+	if (!prefs.begin(NVS_NS, false))
+		return;
+	if (pending != 0)
+		prefs.putUChar("resetpending", pending);
+	else if (prefs.isKey("resetpending"))
+		prefs.remove("resetpending");
+	prefs.end();
+}
+
+// The last BOOT-hold recovery, logged at the next boot (the event log is
+// queued, and the board restarts at once): 1 = settings erased, users kept;
+// 2 = the filesystem did not mount and was formatted.
+static void setRecoveryNote(uint8_t what)
+{
+	Preferences prefs;
+	if (!prefs.begin(NVS_NS, false))
+		return;
+	prefs.putUChar("recovered", what);
+	prefs.end();
+}
+
+static uint8_t takeRecoveryNote()
+{
+	Preferences prefs;
+	if (!prefs.begin(NVS_NS, false))
+		return 0;
+	uint8_t what = prefs.isKey("recovered") ? prefs.getUChar("recovered", 0) : 0;
+	if (what != 0)
+		prefs.remove("recovered");
+	prefs.end();
+	return what;
+}
+
+// A lockout level (core::FailLockout::level()); 0 forgets it. Keys:
+// "pinlock1"/"pinlock2" (wrong PINs per reader; "pinlock", shared, up to
+// 1.4.0), "cardlock1"/"cardlock2" (unknown cards per reader, up to 1.4.2; erased at start-up).
+void storeLockLevel(const char *key, uint32_t level)
+{
+	Preferences prefs;
+	if (!prefs.begin(NVS_NS, false))
+		return;
+	if (level == 0)
+	{
+		if (prefs.isKey(key))
+			prefs.remove(key);
+	}
+	else
+		prefs.putUInt(key, level);
+	prefs.end();
+}
+
+uint32_t storedLockLevel(const char *key)
+{
+	Preferences prefs;
+	if (!prefs.begin(NVS_NS, true))
+		return 0;
+	uint32_t level = prefs.isKey(key) ? prefs.getUInt(key, 0) : 0;
+	prefs.end();
+	return level;
+}
+
+// Remembers the last rolled-back image (system.esp logRollback). True if id
+// is new, i.e. the rollback has not been logged yet.
+bool noteRolledBackImage(const char *id)
+{
+	Preferences prefs;
+	if (!prefs.begin(NVS_NS, false))
+		return false;
+	bool isNew = prefs.getString("rolledback", "") != id;
+	if (isNew)
+		prefs.putString("rolledback", id);
+	prefs.end();
+	return isNew;
+}
+
+// Boot copies of the relay and exit-button settings ("relayboot":
+// core::packRelayBoot, "exitboot": core::packExitBoot), rewritten only when
+// they change.
+static const size_t BOOT_BYTES_MAX = core::RELAY_BOOT_MAX * core::EXIT_BOOT_ENTRY;
+
+void storeBootBytes(const char *key, const uint8_t *packed, size_t len)
+{
+	uint8_t stored[BOOT_BYTES_MAX];
+	if (len > sizeof(stored))
+		return;
+	Preferences prefs;
+	if (!prefs.begin(NVS_NS, false))
+		return;
+	size_t have = prefs.isKey(key) ? prefs.getBytes(key, stored, sizeof(stored)) : 0;
+	if (have != len || memcmp(stored, packed, len) != 0)
+	{
+		if (len == 0)
+			prefs.remove(key);
+		else
+			prefs.putBytes(key, packed, len);
+	}
+	prefs.end();
+}
+
+size_t loadBootBytes(const char *key, uint8_t *out, size_t size)
+{
+	Preferences prefs;
+	if (!prefs.begin(NVS_NS, true))
+		return 0;
+	size_t len = prefs.isKey(key) ? prefs.getBytes(key, out, size) : 0;
+	prefs.end();
+	return len;
+}
+
+/*
+ * LittleFS
+ */
+static bool filesystemLooksBlank()
+{
+	const esp_partition_t *part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, nullptr);
+	if (part == nullptr) return false;
+	constexpr size_t chunkSize = 4096;
+	uint8_t *bytes = static_cast<uint8_t *>(malloc(chunkSize));
+	if (bytes == nullptr) return false;
+	bool blank = true;
+	for (size_t offset = 0; offset < part->size && blank; offset += chunkSize)
+	{
+		size_t count = min(chunkSize, part->size - offset);
+		if (esp_partition_read(part, offset, bytes, count) != ESP_OK)
+		{
+			blank = false;
+			break;
+		}
+		for (size_t i = 0; i < count; i++)
+			if (bytes[i] != 0xff) { blank = false; break; }
+		esp_task_wdt_reset(); // the scan of a blank partition takes a while
+	}
+	free(bytes);
+	return blank;
+}
+
+// /config.json for websocket.esp and mqtt.esp (both declared them; the
+// definitions were in websocket.esp: review 8 R1-2).
+void storeRelayBootFrom(JsonDocument &doc); // config.esp
+
+// Load /config.json into doc. Returns false if missing or unparsable.
+static bool readConfigDoc(JsonDocument &doc)
+{
+	return readJsonFileRecover("/config.json", doc);
+}
+
+static bool writeConfigDoc(JsonDocument &doc)
+{
+	if (!writeJsonFileAtomic("/config.json", doc))
+		return false;
+	storeRelayBootFrom(doc);
+	setCommissionedState(true);
+	clearPendingAdminPassword(); // config.json holds the password from now on
+	return true;
+}

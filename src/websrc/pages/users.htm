@@ -1,0 +1,114 @@
+<template id="userscontent">
+<div class="userspage">
+    <div class="pagehead uhead">
+        <div>
+            <h1>Users</h1>
+            <p>The cards and PINs this reader lets in, and when.</p>
+        </div>
+        <button type="button" id="newuserbtn" class="btn primary" data-onclick="newUser"><svg class="icon"><use href="#i-plus"/></svg>New user</button>
+    </div>
+
+    <div id="usersbanner" class="banner info scanhint">
+        <svg class="icon"><use href="#i-info"/></svg>
+        <div>Hold a card to the reader while this page is open: a new card opens <strong>New user</strong> with its UID filled in, a known card finds its user.</div>
+    </div>
+
+    <div class="toolbar">
+        <div class="search">
+            <svg class="icon"><use href="#i-search"/></svg>
+            <input type="search" id="usersearch" placeholder="Search name or UID" aria-label="Search users by name or UID" autocomplete="off" autocapitalize="off" spellcheck="false">
+        </div>
+    </div>
+    <div class="row2 ufilters">
+        <select id="userfilter" aria-label="Show">
+            <option value="all">All users</option>
+            <option value="1">Access: Always</option>
+            <option value="99">Access: Admin</option>
+            <option value="0">Access: Disabled</option>
+            <option value="expired">Expired or not yet valid</option>
+            <option value="pin">With a PIN</option>
+        </select>
+        <select id="usersort" aria-label="Sort by">
+            <option value="name">Sort: name</option>
+            <option value="uid">Sort: UID</option>
+            <option value="until">Sort: valid until</option>
+        </select>
+    </div>
+
+    <section class="card flush ulistcard">
+        <div class="ucount" id="usercount" aria-live="polite"></div>
+        <div id="loading-img" class="loading">
+            <span class="spinner"></span>
+            <span>Fetching users&hellip; <span id="loadpages"></span></span>
+        </div>
+        <ul id="userlist" class="list" aria-label="Users"></ul>
+        <div id="usersempty" class="empty" hidden></div>
+        <div id="userpager" class="pager" hidden>
+            <button type="button" class="btn small" id="userprev" aria-label="Previous page"><svg class="icon icon-sm flip"><use href="#i-chevron"/></svg>Previous</button>
+            <span id="userpageinfo"></span>
+            <button type="button" class="btn small" id="usernext" aria-label="Next page">Next<svg class="icon icon-sm"><use href="#i-chevron"/></svg></button>
+        </div>
+    </section>
+
+    <dialog id="editor-modal" aria-labelledby="editor-title">
+        <form id="editor" data-oninput="editorDirty" data-onchange="editorDirty">
+            <div class="dlg-head">
+                <h2 id="editor-title" tabindex="-1">New user</h2>
+                <button type="button" class="iconbtn" data-close aria-label="Close"><svg class="icon"><use href="#i-x"/></svg></button>
+            </div>
+            <div class="dlg-body">
+                <div id="editornote" class="banner info" role="status" hidden></div>
+                <div class="field" id="picctyperow" hidden>
+                    <label for="picctype">Card type</label>
+                    <input type="text" id="picctype" name="picctype" disabled>
+                    <div class="hint">As the reader reported the scanned card.</div>
+                </div>
+                <div class="field">
+                    <div class="labelrow"><label for="uid" class="reqd" id="lbl-uid"><span class="ltext">UID</span></label><button type="button" class="help" aria-describedby="lbl-uid" data-content="The card's number as the reader sends it: 1 to 32 letters and digits, stored in lower case. The easiest way to get it right is to hold the card to the reader while this page is open." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <input type="text" id="uid" name="uid" class="mono" placeholder="e.g. 1a2b3c4d" required pattern="[0-9a-z]{1,32}" maxlength="32" autocapitalize="off" autocomplete="off" spellcheck="false" title="1-32 letters and digits (lower case)">
+                    <div id="uidclash" class="hint warnhint" hidden></div>
+                </div>
+                <div class="field">
+                    <label for="username" class="reqd"><span class="ltext">Name or label</span></label>
+                    <input type="text" id="username" name="username" placeholder="e.g. Sam Smith, or Van keys" required autocomplete="off">
+                </div>
+                <div class="field">
+                    <div class="labelrow"><label for="pincode" id="lbl-pincode">PIN code</label><button type="button" class="help" aria-describedby="lbl-pincode" data-content="A keypad-only user (Allow PIN code only, under Doors &amp; Readers): enter the PIN as both the UID and the PIN code. With &quot;Require PIN code after RFID card&quot; on, a card with no PIN is refused." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <input type="text" id="pincode" name="pincode" class="mono" placeholder="Pin code" pattern="[0-9]{4,12}" maxlength="12" inputmode="numeric" autocomplete="off" title="4-12 digits">
+                    <div class="hint">4 to 12 digits. The reader never shows a stored PIN: leave this empty to keep the user's PIN, or type a new one.</div>
+                    <label id="removepinrow" class="check" hidden><input type="checkbox" id="removepin"><span>Remove this user's PIN</span></label>
+                </div>
+                <div class="grid2">
+                    <div class="field">
+                        <label for="validsince" class="reqd"><span class="ltext">Valid from</span></label>
+                        <input type="date" id="validsince" name="validsince" value="1970-01-01" required>
+                    </div>
+                    <div class="field">
+                        <label for="validuntil" class="reqd"><span class="ltext">Valid until</span></label>
+                        <input type="date" id="validuntil" name="validuntil" value="2038-01-01" required>
+                    </div>
+                </div>
+                <div class="hint datehint">Whole days in this browser's time zone, from the start of the first to the end of the last. 1970-01-01 to 2038-01-01 means no limit.</div>
+                <div id="datewarn" class="hint warnhint" hidden>Valid until is before valid from: this user will never be let in.</div>
+                <div id="useraccess">
+                    <div class="field" id="useracctype">
+                        <div class="labelrow"><label for="acctype" class="reqd" id="lbl-acctype"><span class="ltext">Access</span></label><button type="button" class="help" aria-describedby="lbl-acctype" data-content="Always: let in during the opening hours (General settings). Admin: let in at any time, even outside the opening hours. Disabled: kept on the list but refused." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                        <select id="acctype" required>
+                            <option value="1" selected>Always</option>
+                            <option value="0">Disabled</option>
+                            <option value="99">Admin</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div id="editorerror" class="banner danger" role="alert" hidden></div>
+            <div class="dlg-foot">
+                <button type="button" id="deleteuserbtn" class="btn danger" hidden><svg class="icon icon-sm"><use href="#i-trash"/></svg>Delete</button>
+                <span class="spacer"></span>
+                <button type="button" class="btn" data-close>Cancel</button>
+                <button type="submit" id="saveuserbtn" class="btn primary">Save changes</button>
+            </div>
+        </form>
+    </dialog>
+</div>
+</template>

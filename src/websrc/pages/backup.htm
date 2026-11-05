@@ -1,0 +1,89 @@
+<template id="backupcontent">
+<div>
+    <div class="pagehead">
+        <h1>Backup &amp; Restore</h1>
+        <p>Save the users and the settings to files, and load them back.</p>
+    </div>
+    <section class="card">
+        <h2>Backup</h2>
+        <p class="muted">Take a backup regularly, and always before a firmware update or a factory reset.</p>
+        <ul class="list bklist">
+            <li>
+                <svg class="icon bkicon"><use href="#i-users"/></svg>
+                <div class="main">
+                    <div class="title">Users</div>
+                    <div class="sub">Every user with their card UID, PIN, access and dates.</div>
+                </div>
+                <div class="end">
+                    <button type="button" id="backupuserbtn" class="btn" data-onclick="backupuser"><svg class="icon icon-sm"><use href="#i-download"/></svg>Back up users</button>
+                </div>
+            </li>
+            <li>
+                <svg class="icon bkicon"><use href="#i-sliders"/></svg>
+                <div class="main">
+                    <div class="title">Settings</div>
+                    <div class="sub">The settings saved on the reader. Passwords are never included.</div>
+                </div>
+                <div class="end">
+                    <button type="button" id="backupsetbtn" class="btn" data-onclick="backupset"><svg class="icon icon-sm"><use href="#i-download"/></svg>Back up settings</button>
+                </div>
+            </li>
+        </ul>
+        <div id="loading-img" class="loading bkloading" role="status" style="display:none">
+            <span class="spinner" aria-hidden="true"></span><span id="bkbusytext">Reading the users from the reader&hellip;</span>
+        </div>
+        <a id="downloadUser" hidden></a>
+        <a id="downloadSet" hidden></a>
+    </section>
+    <section class="card">
+        <h2>Restore</h2>
+        <p class="muted">Choose a backup file made on this page.</p>
+        <ul class="list bklist">
+            <li>
+                <svg class="icon bkicon"><use href="#i-users"/></svg>
+                <div class="main">
+                    <div class="title">Users</div>
+                    <div class="sub">Adds the users in the file. A user with the same UID is replaced; other users stay.</div>
+                </div>
+                <div class="end">
+                    <button type="button" class="btn" data-onclick="pickBackupFile" data-arg="restoreUser"><svg class="icon icon-sm"><use href="#i-upload"/></svg>Restore users</button>
+                    <input id="restoreUser" type="file" accept=".json,application/json,text/json" data-onchange="restoreUser" hidden>
+                </div>
+            </li>
+            <li>
+                <svg class="icon bkicon"><use href="#i-sliders"/></svg>
+                <div class="main">
+                    <div class="title">Settings</div>
+                    <div class="sub">Stages the settings in the file: you review them, then Save &amp; Reboot.</div>
+                </div>
+                <div class="end">
+                    <button type="button" class="btn" data-onclick="pickBackupFile" data-arg="restoreSet"><svg class="icon icon-sm"><use href="#i-upload"/></svg>Restore settings</button>
+                    <input id="restoreSet" type="file" accept=".json,application/json,text/json" data-onchange="restoreSet" hidden>
+                </div>
+            </li>
+        </ul>
+    </section>
+    <section class="card">
+        <h2>Restart</h2>
+        <div class="restartrow">
+            <p class="muted">Restarts the reader. Settings you have not saved are lost. The doors do not respond for a few seconds.</p>
+            <button type="button" id="restart" class="btn danger" data-onclick="restartESP"><svg class="icon icon-sm"><use href="#i-rotate"/></svg>Restart reader</button>
+        </div>
+    </section>
+
+    <!-- the progress of Restore users: one user at a time, each answered by the reader -->
+    <dialog id="restoremodal" aria-labelledby="restoretitle">
+        <div class="dlg-head"><h2 id="restoretitle">Restoring users&hellip;</h2></div>
+        <div class="dlg-body">
+            <div class="progress-label" id="restorestate">Starting&hellip;</div>
+            <div class="progress"><div id="dynamic" class="bar busy" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-labelledby="restorestate"></div></div>
+            <p class="muted small" id="restorenote">Keep this page open until the restore has finished.</p>
+            <div id="restoreskipped" class="banner warning restoreskipped" hidden></div>
+        </div>
+        <div class="dlg-foot">
+            <button type="button" id="restoreusers" class="btn" data-onclick="restoreOpenUsers" hidden>Open Users</button>
+            <button type="button" id="restoreclose" class="btn primary" data-close hidden>Close</button>
+        </div>
+    </dialog>
+</div>
+</template>

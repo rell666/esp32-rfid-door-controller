@@ -1,0 +1,280 @@
+<template id="hardwarecontent">
+<div class="hw-page">
+    <div class="pagehead">
+        <h1>Doors &amp; Readers</h1>
+        <p>Which reader opens which door, and the pins each part is wired to.</p>
+    </div>
+
+    <!-- ---- setup: how many doors and readers ---- -->
+    <section class="card">
+        <h2 class="if-hw-head">Setup</h2>
+        <div class="grid2">
+            <div class="field">
+                <div class="labelrow"><label for="numrlys" id="lbl-numrlys">Doors</label><button type="button" class="help" aria-describedby="lbl-numrlys" data-content="One relay per door. The VOANZO board has two relays, so up to two doors." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                <select id="numrlys" data-onchange="changeRelayNumber"><option value="1">1 door</option><option value="2">2 doors</option><option value="3">3 doors</option><option value="4">4 doors</option></select>
+            </div>
+            <div class="field">
+                <div class="labelrow"><label for="r2enabled" id="lbl-r2enabled">Readers</label><button type="button" class="help" aria-describedby="lbl-r2enabled" data-content="Both readers are Wiegand readers (cards and keypads). Two readers can open two doors, or one door with a reader on each side (one In, one Out)." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                <select id="r2enabled" data-onchange="changeReaderCount"><option value="0">1 reader</option><option value="1">2 readers</option></select>
+            </div>
+        </div>
+        <div class="hw-summary" role="status">
+            <svg class="icon"><use href="#i-door"/></svg>
+            <p id="setupnote"></p>
+        </div>
+        <p class="muted small">Only pins that are safe on this board's chip are offered (flash, USB/serial-console and boot-strapping pins are left out). See README-IRONFRAME.md for wiring.</p>
+    </section>
+
+    <!-- ---- doors: one card per door; each reader sits in the card of the door it opens ---- -->
+    <h2 class="if-hw-head hw-section">Doors</h2>
+    <p class="muted small hw-section-sub">Each door has its own relay, door sensor and exit button. A reader appears in the card of the door it opens.</p>
+
+    <section id="alldoorsreaders" class="card if-door hw-door" hidden>
+        <header class="hw-door-head">
+            <svg class="icon"><use href="#i-door"/></svg>
+            <h2>Reader for every door</h2>
+        </header>
+        <p class="muted small">This reader opens every door the user has access to.</p>
+        <div class="door-readers"></div>
+    </section>
+
+    <div id="relayformparent">
+        <section id="relayform" class="card if-door hw-door">
+            <header class="hw-door-head">
+                <svg class="icon"><use href="#i-door"/></svg>
+                <h2 id="relaytitle">Door 1</h2>
+                <span class="hw-door-name"></span>
+            </header>
+            <div class="field">
+                <div class="labelrow"><label for="doorname" id="lbl-doorname">Door name</label><button type="button" class="help" aria-describedby="lbl-doorname" data-content="The name shown in the access log, the user list and MQTT, for example Front door." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                <input id="doorname" type="text" maxlength="63" placeholder="For example Front door" data-oninput="doorNameTyped" data-arg="1">
+            </div>
+
+            <h3 class="subhead">Relay and lock</h3>
+            <div class="field">
+                <div class="labelrow"><label for="gpiorly" id="lbl-gpiorly">Relay pin</label><button type="button" class="help" aria-describedby="lbl-gpiorly" data-content="The GPIO that switches this door's relay. On the VOANZO board relay 1 is GPIO 16 and relay 2 is GPIO 17." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                <div class="hw-pinrow">
+                    <select id="gpiorly"></select>
+                    <button id="testb" type="button" class="btn small" data-onclick="testRelay" data-arg="1">Test</button>
+                </div>
+                <div class="hint">Test really switches the relay, using the pin saved on the reader: after changing the pin, Save &amp; Reboot first.</div>
+            </div>
+            <div class="grid2">
+                <div class="field">
+                    <div class="labelrow"><label for="typerly" id="lbl-typerly">Relay type</label><button type="button" class="help" aria-describedby="lbl-typerly" data-content="The pin level that switches this board's relay on (the VOANZO board: Active High). Active High: the relay switches on when the pin goes high (most relay boards). Active Low: it switches on when the pin goes low." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <select id="typerly">
+                        <option value="1">Active High</option>
+                        <option value="0">Active Low</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <div class="labelrow"><label for="lockType" id="lbl-lockType">Lock type</label><button type="button" class="help" aria-describedby="lbl-lockType" data-content="Momentary: the relay switches for the unlock time, then lets go (electric strikes and most locks). Continuous: a valid card unlocks the door and it stays unlocked; no card locks it again. Lock it with Test on this page or MQTT close." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <select id="lockType" data-onchange="handleLock" data-arg="1">
+                        <option value="0">Momentary</option>
+                        <option value="1">Continuous</option>
+                    </select>
+                </div>
+            </div>
+            <div class="field">
+                <div class="labelrow"><label for="holdrly" id="lbl-holdrly">When the relay is on, the door is</label><button type="button" class="help" aria-describedby="lbl-holdrly" data-content="Unlocked: the relay switches on to open the door (an electric strike, or a maglock wired to NC). Locked: the relay is on all the time the door is locked and switches off to open it (a maglock wired to NO). Then the magnet is released whenever the controller fails, restarts or loses power: the door opens." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                <select id="holdrly">
+                    <option value="0">Unlocked (electric strike, or maglock on NC)</option>
+                    <option value="1">Locked (maglock on NO: released if the controller fails or loses power)</option>
+                </select>
+            </div>
+            <div class="field" id="activateTimeForm">
+                <div class="labelrow"><label for="delay" id="lbl-delay">Unlock time</label><button type="button" class="help" aria-describedby="lbl-delay" data-content="How long the relay stays switched after a valid card, in milliseconds (1000 ms = 1 second). 3000-5000 ms suits most door locks." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                <div class="hw-unit">
+                    <input id="delay" type="number" min="100" max="30000" step="100" value="3000" name="hightime" inputmode="numeric">
+                    <span>ms</span>
+                </div>
+                <div class="hint">100-30000 ms. 3000 ms is 3 seconds.</div>
+            </div>
+
+            <h3 class="subhead">Door sensor and exit button</h3>
+            <div class="grid2">
+                <div class="field door1-only">
+                    <div class="labelrow"><label for="doorstatpin" id="lbl-doorstatpin">Door sensor pin</label><button type="button" class="help" aria-describedby="lbl-doorstatpin" data-content="A door contact wired to GND (closed = door shut). Logs Door Open / Closed, a door forced open while locked, and a door left open too long." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <select id="doorstatpin"><option value="255">None</option></select>
+                </div>
+                <div class="field door1-only">
+                    <div class="labelrow"><label for="openlockpin" id="lbl-openlockpin">Exit button pin</label><button type="button" class="help" aria-describedby="lbl-openlockpin" data-content="A push button wired to GND that opens this door from inside, as a valid card would." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <select id="openlockpin"><option value="255">None</option></select>
+                </div>
+                <!-- doors 2-4 only: door 1 uses the two fields above -->
+                <div class="field door-extra" hidden>
+                    <div class="labelrow"><label for="doorpinrly" id="lbl-doorpinrly">Door sensor pin</label><button type="button" class="help" aria-describedby="lbl-doorpinrly" data-content="This door's contact, wired to GND (closed = door shut). Logs Door Open / Closed, a door forced open while locked, and a door left open too long." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <select id="doorpinrly"><option value="255">None</option></select>
+                </div>
+                <div class="field door-extra" hidden>
+                    <div class="labelrow"><label for="exitpinrly" id="lbl-exitpinrly">Exit button pin</label><button type="button" class="help" aria-describedby="lbl-exitpinrly" data-content="A push button wired to GND that opens this door from inside." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <select id="exitpinrly"><option value="255">None</option></select>
+                </div>
+            </div>
+
+            <h3 class="subhead">Readers at this door</h3>
+            <p class="muted small hw-noreader" hidden></p>
+            <div class="door-readers"></div>
+        </section>
+    </div>
+
+    <!-- reader cards wait here; placeReaders() moves each into the card of its door -->
+    <div id="readerpark" hidden>
+        <div id="reader1block" class="if-reader hw-reader">
+            <header class="hw-reader-head">
+                <h3 class="if-reader-title">Reader 1</h3>
+                <span class="badge info hw-rtype">Wiegand</span>
+                <span class="badge hw-rside" hidden></span>
+            </header>
+            <div class="grid2">
+                <div class="field">
+                    <div class="labelrow"><label for="r1door" id="lbl-r1door">Reader 1 opens</label><button type="button" class="help" aria-describedby="lbl-r1door" data-content="The door this reader unlocks. Every door: one reader for all of them; each user is let through the doors their access allows." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <select id="r1door" data-onchange="readerMoved" data-arg="1"></select>
+                </div>
+                <div class="field">
+                    <div class="labelrow"><label for="r1dir" id="lbl-r1dir">Reader 1 side</label><button type="button" class="help" aria-describedby="lbl-r1dir" data-content="For one door with a reader on each side. In or Out is written to the access log and sent over MQTT; both sides open the door." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <select id="r1dir" data-onchange="placeReaders"><option value="0">Not set</option><option value="1">In (entering)</option><option value="2">Out (leaving)</option></select>
+                </div>
+            </div>
+            <div class="grid2" id="wiegandPins">
+                <div class="field">
+                    <div class="labelrow"><label for="wg0pin" id="lbl-wg0pin">Reader 1 D0</label><button type="button" class="help" aria-describedby="lbl-wg0pin" data-content="The GPIO wired to the reader's D0 (data 0, often green) wire." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <select id="wg0pin"></select>
+                </div>
+                <div class="field">
+                    <div class="labelrow"><label for="wg1pin" id="lbl-wg1pin">Reader 1 D1</label><button type="button" class="help" aria-describedby="lbl-wg1pin" data-content="The GPIO wired to the reader's D1 (data 1, often white) wire." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <select id="wg1pin"></select>
+                </div>
+            </div>
+            <div class="grid2">
+                <div class="field">
+                    <div class="labelrow"><label for="r1ledpin" id="lbl-r1ledpin">Reader 1 LED line</label><button type="button" class="help" aria-describedby="lbl-r1ledpin" data-content="The GPIO driving the reader's LED control wire, so it lights green on a valid card. None if not wired." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <select id="r1ledpin"><option value="255">None</option></select>
+                </div>
+                <div class="field">
+                    <div class="labelrow"><label for="r1beeperpin" id="lbl-r1beeperpin">Reader 1 buzzer line</label><button type="button" class="help" aria-describedby="lbl-r1beeperpin" data-content="The GPIO driving the reader's buzzer control wire. None if not wired." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <select id="r1beeperpin"><option value="255">None</option></select>
+                </div>
+            </div>
+        </div>
+
+        <div id="reader2block" class="if-reader hw-reader">
+            <header class="hw-reader-head">
+                <h3 class="if-reader-title">Reader 2</h3>
+                <span class="badge info">Wiegand</span>
+                <span class="badge hw-rside" hidden></span>
+            </header>
+            <div class="grid2">
+                <div class="field">
+                    <div class="labelrow"><label for="r2door" id="lbl-r2door">Reader 2 opens</label><button type="button" class="help" aria-describedby="lbl-r2door" data-content="The door this reader unlocks. Give it the same door as reader 1 for a reader on each side of one door." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <select id="r2door" data-onchange="readerMoved" data-arg="2"></select>
+                </div>
+                <div class="field">
+                    <div class="labelrow"><label for="r2dir" id="lbl-r2dir">Reader 2 side</label><button type="button" class="help" aria-describedby="lbl-r2dir" data-content="For one door with a reader on each side. In or Out is written to the access log and sent over MQTT; both sides open the door." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <select id="r2dir" data-onchange="placeReaders"><option value="0">Not set</option><option value="1">In (entering)</option><option value="2">Out (leaving)</option></select>
+                </div>
+            </div>
+            <div class="grid2">
+                <div class="field">
+                    <div class="labelrow"><label for="r2wg0pin" id="lbl-r2wg0pin">Reader 2 D0</label><button type="button" class="help" aria-describedby="lbl-r2wg0pin" data-content="The GPIO wired to reader 2's D0 (data 0, often green) wire." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <select id="r2wg0pin"><option value="255">None</option></select>
+                </div>
+                <div class="field">
+                    <div class="labelrow"><label for="r2wg1pin" id="lbl-r2wg1pin">Reader 2 D1</label><button type="button" class="help" aria-describedby="lbl-r2wg1pin" data-content="The GPIO wired to reader 2's D1 (data 1, often white) wire." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <select id="r2wg1pin"><option value="255">None</option></select>
+                </div>
+            </div>
+            <div class="grid2">
+                <div class="field">
+                    <label for="r2ledpin">Reader 2 LED line</label>
+                    <select id="r2ledpin"><option value="255">None</option></select>
+                </div>
+                <div class="field">
+                    <label for="r2beeperpin">Reader 2 buzzer line</label>
+                    <select id="r2beeperpin"><option value="255">None</option></select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ---- settings shared by every door and reader ---- -->
+    <section class="card">
+        <h2 class="if-hw-head">Common to all doors</h2>
+        <div>
+            <h3 class="subhead">Wiegand cards and keypads</h3>
+            <div class="field">
+                <div class="labelrow"><label for="useridstoragemode" id="lbl-useridstoragemode">User ID storage mode</label><button type="button" class="help" aria-describedby="lbl-useridstoragemode" data-content="How card numbers read by a Wiegand reader are written down. Typing a card number on the keypad never opens the door: keypad-only users have their own PIN record (see Allow PIN code only)." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                <select id="useridstoragemode">
+                    <option value="hexadecimal">Hexadecimal</option>
+                    <option value="decimal">Decimal</option>
+                </select>
+            </div>
+            <div class="field">
+                <div class="labelrow"><label class="switch" for="allowpincodeonly" id="lbl-allowpincodeonly"><span>Allow pin code only</span><input type="checkbox" id="allowpincodeonly"></label><button type="button" class="help" aria-describedby="lbl-allowpincodeonly" data-content="A keypad-only user is enrolled with the PIN as both the UID and the Pin code. Use at least 6 digits. Card numbers and card PINs typed alone do not open the door." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                <div class="hint">Lets keypad-only users in with a PIN and no card.</div>
+            </div>
+            <div class="field">
+                <div class="labelrow"><label class="switch" for="removeparitybits" id="lbl-removeparitybits"><span>Remove parity bits</span><input type="checkbox" id="removeparitybits"></label><button type="button" class="help" aria-describedby="lbl-removeparitybits" data-content="A Wiegand card number starts and ends with a parity bit, used to check the read. Leave this on unless your card numbers only match with the parity bits kept." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                <div class="hint">On for almost every reader.</div>
+            </div>
+        </div>
+        <div class="field">
+            <div class="labelrow"><label class="switch" for="requirepincodeafterrfid" id="lbl-requirepincodeafterrfid"><span>Require pin code after RFID card</span><input type="checkbox" id="requirepincodeafterrfid"></label><button type="button" class="help" aria-describedby="lbl-requirepincodeafterrfid" data-content="Off by default. When on, a pin code typed on a Wiegand keypad is required after the card, on every reader. A card whose user has no pin code is refused (Event Log: PIN required, user has no PIN), admin cards too: give every card user a pin code before turning this on." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+            <div class="hint">Card plus PIN on every reader. Users without a PIN are refused.</div>
+        </div>
+        <div class="grid2">
+            <div class="field">
+                <div class="labelrow"><label for="readerfeedback" id="lbl-readerfeedback">LED/buzzer drive</label><button type="button" class="help" aria-describedby="lbl-readerfeedback" data-content="Readers switch their LED and buzzer when the control wire is pulled to ground. Through an NPN transistor the ESP output is active HIGH; through a diode straight to the ESP pin it is active LOW." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                <select id="readerfeedback">
+                    <option value="1">Active high (NPN transistor, recommended)</option>
+                    <option value="0">Active low (diode to the ESP pin)</option>
+                </select>
+            </div>
+            <div class="field">
+                <div class="labelrow"><label for="maxOpenDoorTime" id="lbl-maxOpenDoorTime">Door left-open alarm (all doors)</label><button type="button" class="help" aria-describedby="lbl-maxOpenDoorTime" data-content="A door held open longer than this, in seconds, is logged as left open and raises the tamper alarm. Needs a door sensor. 0 turns the alarm off." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                <div class="hw-unit">
+                    <input id="maxOpenDoorTime" type="number" min="0" max="600" value="0" inputmode="numeric">
+                    <span>s</span>
+                </div>
+                <div class="hint">0-600 seconds; 0 = off.</div>
+            </div>
+        </div>
+
+        <details class="hw-advanced">
+            <summary><span>Status lights, beeper and doorbell pins</span><span class="muted small">Advanced, optional</span></summary>
+            <p class="muted small">Extra outputs on the controller itself, not on a reader. Leave them at None unless you have wired one.</p>
+            <div class="grid2">
+                <div class="field">
+                    <div class="labelrow"><label for="wifipin" id="lbl-wifipin">WiFi LED</label><button type="button" class="help" aria-describedby="lbl-wifipin" data-content="An LED that lights while the reader is connected to Wi-Fi." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <select id="wifipin"><option value="255">None</option></select>
+                </div>
+                <div class="field">
+                    <div class="labelrow"><label for="beeperpin" id="lbl-beeperpin">Beeper</label><button type="button" class="help" aria-describedby="lbl-beeperpin" data-content="A buzzer on the controller itself (not the one in a reader), for access feedback." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <select id="beeperpin"><option value="255">None</option></select>
+                </div>
+                <div class="field">
+                    <div class="labelrow"><label for="accessdeniedpin" id="lbl-accessdeniedpin">Access denied LED</label><button type="button" class="help" aria-describedby="lbl-accessdeniedpin" data-content="An LED that lights when a card is refused." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <select id="accessdeniedpin"><option value="255">None</option></select>
+                </div>
+                <div class="field">
+                    <div class="labelrow"><label for="ledwaitingpin" id="lbl-ledwaitingpin">Pin waiting LED</label><button type="button" class="help" aria-describedby="lbl-ledwaitingpin" data-content="An LED that lights while the reader waits for a pin code after a card." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <select id="ledwaitingpin"><option value="255">None</option></select>
+                </div>
+                <div class="field">
+                    <div class="labelrow"><label for="doorbellpin" id="lbl-doorbellpin">Doorbell Pin</label><button type="button" class="help" aria-describedby="lbl-doorbellpin" data-content="A doorbell push button wired to GND: each press is logged and sent over MQTT." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                    <select id="doorbellpin"><option value="255">None</option></select>
+                </div>
+            </div>
+        </details>
+    </section>
+
+    <div id="hwproblem" class="banner danger" role="alert" hidden>
+        <svg class="icon"><use href="#i-alert"/></svg>
+        <div><strong>These settings cannot be saved yet.</strong> <span id="hwproblemtext"></span></div>
+    </div>
+    <div class="actions hw-save">
+        <p class="muted small">Save shows what changes for you to confirm; nothing is stored on the reader until you do.</p>
+        <button type="button" data-onclick="savePage" data-arg="hardware" class="btn primary">Save</button>
+    </div>
+</div>
+</template>

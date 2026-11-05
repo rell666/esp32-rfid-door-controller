@@ -1,0 +1,1122 @@
+{
+ "about": "Configuration policy vectors (core/configpolicy.h). Asserted by test/native/tests.cpp against the firmware code and by test/e2e/run.mjs against the simulator (device-sim.mjs). Each case starts from base, applies set (dotted path -> value; null removes the key), runs the policy for chip with password as the admin password in force (stored, as on the device, as its Digest HA1; it must be changed first when mustchange is true or, if mustchange is absent, when password is the factory or a too-short one), and expects problem (exact message, or null) and, when accepted, the values in expect.",
+ "base": {
+  "network": {
+   "wmode": 0,
+   "ssid": "site-wifi",
+   "pswd": ""
+  },
+  "hardware": {
+   "readertype": 1,
+   "wgd0pin": 4,
+   "wgd1pin": 13,
+   "rpin": 16,
+   "rtime": 3000,
+   "rtype": 1,
+   "ltype": 0,
+   "numrelays": 1,
+   "sspin": 21,
+   "rdm6300pin": 255,
+   "wifipin": 255,
+   "doorstatpin": 255,
+   "doorbellpin": 255,
+   "openlockpin": 255,
+   "accessdeniedpin": 255,
+   "beeperpin": 255,
+   "ledwaitingpin": 255,
+   "maxOpenDoorTime": 0
+  },
+  "general": {
+   "pswd": "Site-Door-2026",
+   "openinghours": [
+    "111111111111111111111111",
+    "111111111111111111111111",
+    "111111111111111111111111",
+    "111111111111111111111111",
+    "111111111111111111111111",
+    "111111111111111111111111",
+    "111111111111111111111111"
+   ]
+  }
+ },
+ "cases": [
+  {
+   "name": "valid settings, ESP32",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {},
+   "problem": null,
+   "expect": {
+    "general.pswd": "55660a03a22f4e179a972642deb67353",
+    "warn": false,
+    "general.pswdhash": 1
+   }
+  },
+  {
+   "name": "valid settings, ESP32-S3",
+   "chip": "esp32s3",
+   "password": "Site-Door-2026",
+   "set": {},
+   "problem": null
+  },
+  {
+   "name": "fresh browser sends the UI default admin: current password kept",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "general.pswd": "admin"
+   },
+   "problem": null,
+   "expect": {
+    "general.pswd": "55660a03a22f4e179a972642deb67353",
+    "warn": false
+   }
+  },
+  {
+   "name": "old backup with a short password: current kept, with a warning",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "general.pswd": "short"
+   },
+   "problem": null,
+   "expect": {
+    "general.pswd": "55660a03a22f4e179a972642deb67353",
+    "warn": true
+   }
+  },
+  {
+   "name": "settings carrying a new, acceptable admin password: current kept, with a warning (only setpassword changes it)",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "general.pswd": "Another-Door-2027"
+   },
+   "problem": null,
+   "expect": {
+    "general.pswd": "55660a03a22f4e179a972642deb67353",
+    "warn": true
+   }
+  },
+  {
+   "name": "no admin password set yet",
+   "chip": "esp32",
+   "password": "admin",
+   "set": {
+    "general.pswd": "admin"
+   },
+   "problem": "Set an admin password first (Change Password)"
+  },
+  {
+   "name": "settings carrying the current admin password typed out: kept, no warning",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "general.pswd": "Site-Door-2026"
+   },
+   "problem": null,
+   "expect": {
+    "general.pswd": "55660a03a22f4e179a972642deb67353",
+    "general.pswdhash": 1,
+    "warn": false
+   }
+  },
+  {
+   "name": "settings carrying the stored hash (a masked password merged back): kept, no warning",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "general.pswd": "55660a03a22f4e179a972642deb67353"
+   },
+   "problem": null,
+   "expect": {
+    "general.pswd": "55660a03a22f4e179a972642deb67353",
+    "warn": false
+   }
+  },
+  {
+   "name": "a backup carrying a must-change flag: cleared, the password in force kept",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "general.pswdchange": 1,
+    "general.pswdhash": 0
+   },
+   "problem": null,
+   "expect": {
+    "general.pswdchange": null,
+    "general.pswdhash": 1,
+    "general.pswd": "55660a03a22f4e179a972642deb67353"
+   }
+  },
+  {
+   "name": "stored password flagged must-change: refused whatever it is",
+   "chip": "esp32",
+   "password": "Long-Enough-2026",
+   "mustchange": true,
+   "set": {},
+   "problem": "Set an admin password first (Change Password)"
+  },
+  {
+   "name": "missing general section",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "general": null
+   },
+   "problem": "Opening hours are required"
+  },
+  {
+   "name": "access point with no SSID",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "network.wmode": 1,
+    "network.ssid": ""
+   },
+   "problem": "Access point SSID must not be empty"
+  },
+  {
+   "name": "access point password of 7 characters",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "network.wmode": 1,
+    "network.pswd": "1234567"
+   },
+   "problem": "Access point password must be empty (open) or 8-63 characters"
+  },
+  {
+   "name": "open access point is allowed",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "network.wmode": 1,
+    "network.pswd": ""
+   },
+   "problem": null
+  },
+  {
+   "name": "access point password of 8 characters",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "network.wmode": 1,
+    "network.pswd": "12345678"
+   },
+   "problem": null
+  },
+  {
+   "name": "maximum open time 601 s",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.maxOpenDoorTime": 601
+   },
+   "problem": "Maximum open time must be 0-600 seconds"
+  },
+  {
+   "name": "relay time 50 ms",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.rtime": 50
+   },
+   "problem": "Relay activate time must be 100-30000 ms"
+  },
+  {
+   "name": "relay time negative, as a string",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.rtime": "-400"
+   },
+   "problem": "Relay activate time must be 100-30000 ms"
+  },
+  {
+   "name": "relay 2 time 31000 ms",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.numrelays": 2,
+    "hardware.relay2": {
+     "rpin": 17,
+     "rtime": 31000
+    }
+   },
+   "problem": "Relay activate time must be 100-30000 ms"
+  },
+  {
+   "name": "relay 2 time ignored while only one relay is used",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.relay2": {
+     "rpin": 17,
+     "rtime": 31000
+    }
+   },
+   "problem": null
+  },
+  {
+   "name": "relay type 2 refused (lock state read wrong: every opening logged as forced)",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.rtype": 2
+   },
+   "problem": "Relay type must be Active High or Active Low"
+  },
+  {
+   "name": "relay type active low accepted",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.rtype": 0
+   },
+   "problem": null
+  },
+  {
+   "name": "door Locked when the relay is on (rhold 1) accepted",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.rhold": 1
+   },
+   "problem": null,
+   "expect": {
+    "hardware.rhold": 1
+   }
+  },
+  {
+   "name": "rhold 2 refused",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.rhold": 2
+   },
+   "problem": "When the relay is on, the door must be Unlocked or Locked"
+  },
+  {
+   "name": "relay 2 rhold as a string \"1\" accepted",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.numrelays": 2,
+    "hardware.relay2": {
+     "rpin": 17,
+     "rtime": 3000,
+     "rhold": "1"
+    }
+   },
+   "problem": null
+  },
+  {
+   "name": "relay 2 rhold -1 refused",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.numrelays": 2,
+    "hardware.relay2": {
+     "rpin": 17,
+     "rtime": 3000,
+     "rhold": -1
+    }
+   },
+   "problem": "When the relay is on, the door must be Unlocked or Locked"
+  },
+  {
+   "name": "lock type 5 refused (the relay never fired)",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.ltype": 5
+   },
+   "problem": "Lock type must be Momentary or Continuous"
+  },
+  {
+   "name": "relay 2 lock type as a string out of range",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.numrelays": 2,
+    "hardware.relay2": {
+     "rpin": 17,
+     "rtime": 3000,
+     "ltype": "2"
+    }
+   },
+   "problem": "Lock type must be Momentary or Continuous"
+  },
+  {
+   "name": "relay 2 relay type -1 refused",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.numrelays": 2,
+    "hardware.relay2": {
+     "rpin": 17,
+     "rtime": 3000,
+     "rtype": -1
+    }
+   },
+   "problem": "Relay type must be Active High or Active Low"
+  },
+  {
+   "name": "relay 2 types ignored while only one relay is used",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.relay2": {
+     "rpin": 17,
+     "rtype": 9,
+     "ltype": 9
+    }
+   },
+   "problem": null
+  },
+  {
+   "name": "relay count clamped to 4",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.numrelays": 9
+   },
+   "problem": null,
+   "expect": {
+    "hardware.numrelays": 4
+   }
+  },
+  {
+   "name": "reader 1 bound to a door that does not exist",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.reader1": {
+     "door": 1
+    }
+   },
+   "problem": "Reader 1 has an invalid door binding"
+  },
+  {
+   "name": "reader 2 enabled without a door",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.numrelays": 2,
+    "hardware.relay2": {
+     "rpin": 17,
+     "rtime": 3000
+    },
+    "hardware.reader2": {
+     "enabled": 1,
+     "door": -1,
+     "wgd0pin": 32,
+     "wgd1pin": 33
+    }
+   },
+   "problem": "Reader 2 must be bound to a configured door"
+  },
+  {
+   "name": "two readers, two doors (VOANZO preset pins)",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.wgd0pin": 34,
+    "hardware.wgd1pin": 35,
+    "hardware.numrelays": 2,
+    "hardware.relay2": {
+     "rpin": 17,
+     "rtime": 3000
+    },
+    "hardware.reader1": {
+     "door": 0
+    },
+    "hardware.reader2": {
+     "enabled": 1,
+     "door": 1,
+     "wgd0pin": 32,
+     "wgd1pin": 33
+    }
+   },
+   "problem": null
+  },
+  {
+   "name": "GPIO12 (flash voltage strap) refused on the ESP32",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.wgd0pin": 12
+   },
+   "problem": "Reader 1 D0: GPIO 12 cannot be used on this board"
+  },
+  {
+   "name": "input-only GPIO34 refused as a relay",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.rpin": 34
+   },
+   "problem": "Relay 1: GPIO 34 cannot be used as an output on this board"
+  },
+  {
+   "name": "GPIO34 does not exist on the S3",
+   "chip": "esp32s3",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.wgd0pin": 34
+   },
+   "problem": "Reader 1 D0: GPIO 34 cannot be used on this board"
+  },
+  {
+   "name": "pin used twice",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.rpin": 4
+   },
+   "problem": "GPIO 4 is used twice: Reader 1 D0 and Relay 1"
+  },
+  {
+   "name": "pin as a string (upstream UI) still counts",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.rpin": "13"
+   },
+   "problem": "GPIO 13 is used twice: Reader 1 D1 and Relay 1"
+  },
+  {
+   "name": "Wiegand reader: an SPI clock pin is free",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.rpin": 18
+   },
+   "problem": null
+  },
+  {
+   "name": "six days of opening hours",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "general.openinghours": [
+     "1",
+     "1",
+     "1",
+     "1",
+     "1",
+     "1"
+    ]
+   },
+   "problem": "Opening hours must contain seven days"
+  },
+  {
+   "name": "an opening-hours day of 23 hours",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "general.openinghours": [
+     "11111111111111111111111",
+     "111111111111111111111111",
+     "111111111111111111111111",
+     "111111111111111111111111",
+     "111111111111111111111111",
+     "111111111111111111111111",
+     "111111111111111111111111"
+    ]
+   },
+   "problem": "Each opening-hours day must contain exactly 24 zero/one values"
+  },
+  {
+   "name": "no opening hours",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "general.openinghours": null
+   },
+   "problem": "Opening hours are required"
+  },
+  {
+   "name": "door sensor on input-only GPIO34 (no pull-up) refused",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.doorstatpin": 34
+   },
+   "problem": "Door sensor: GPIO 34 cannot be used as an output on this board"
+  },
+  {
+   "name": "door 2 contact and exit button on free pins",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.numrelays": 2,
+    "hardware.relay2": {
+     "rpin": 17,
+     "rtime": 3000,
+     "rtype": 1,
+     "ltype": 0,
+     "doorstatpin": 21,
+     "openlockpin": 22
+    }
+   },
+   "problem": null,
+   "expect": {
+    "hardware.relay2.doorstatpin": 21
+   }
+  },
+  {
+   "name": "door 2 contact on the relay 1 pin",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.numrelays": 2,
+    "hardware.relay2": {
+     "rpin": 17,
+     "rtime": 3000,
+     "rtype": 1,
+     "ltype": 0,
+     "doorstatpin": 16
+    }
+   },
+   "problem": "GPIO 16 is used twice: Relay 1 and Door 2 sensor"
+  },
+  {
+   "name": "door 2 exit button on a flash pin",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.numrelays": 2,
+    "hardware.relay2": {
+     "rpin": 17,
+     "rtime": 3000,
+     "rtype": 1,
+     "ltype": 0,
+     "openlockpin": 7
+    }
+   },
+   "problem": "Door 2 exit button: GPIO 7 cannot be used as an output on this board"
+  },
+  {
+   "name": "door 2 pins ignored while only one relay is configured",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.numrelays": 1,
+    "hardware.relay2": {
+     "rpin": 17,
+     "doorstatpin": 16
+    }
+   },
+   "problem": null
+  },
+  {
+   "name": "MQTT door control on",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "mqtt.doorcontrol": 1
+   },
+   "problem": null,
+   "expect": {
+    "mqtt.doorcontrol": 1
+   }
+  },
+  {
+   "name": "MQTT door control as a string \"0\"",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "mqtt.doorcontrol": "0"
+   },
+   "problem": null
+  },
+  {
+   "name": "MQTT door control 2 refused",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "mqtt.doorcontrol": 2
+   },
+   "problem": "MQTT door control must be Enabled or Disabled"
+  },
+  {
+   "name": "card number in MQTT: full",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "mqtt.carduid": 2
+   },
+   "problem": null,
+   "expect": {
+    "mqtt.carduid": 2
+   }
+  },
+  {
+   "name": "card number in MQTT: off, as a string \"0\"",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "mqtt.carduid": "0"
+   },
+   "problem": null
+  },
+  {
+   "name": "card number in MQTT: missing is accepted (last 4)",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "mqtt.doorcontrol": 0
+   },
+   "problem": null
+  },
+  {
+   "name": "card number in MQTT 3 refused",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "mqtt.carduid": 3
+   },
+   "problem": "Card number in MQTT must be Off, Last 4 or Full"
+  },
+  {
+   "name": "card number in MQTT -1 refused",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "mqtt.carduid": -1
+   },
+   "problem": "Card number in MQTT must be Off, Last 4 or Full"
+  },
+  {
+   "name": "card number in MQTT as text refused",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "mqtt.carduid": "full"
+   },
+   "problem": "Card number in MQTT must be Off, Last 4 or Full"
+  },
+  {
+   "name": "reader type MFRC522 (0) refused: only Wiegand is left",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.readertype": 0
+   },
+   "problem": "Reader 1 must be a Wiegand reader (MFRC522, PN532 and RDM6300 are no longer supported)"
+  },
+  {
+   "name": "reader type PN532 (2) refused: only Wiegand is left",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.readertype": 2
+   },
+   "problem": "Reader 1 must be a Wiegand reader (MFRC522, PN532 and RDM6300 are no longer supported)"
+  },
+  {
+   "name": "reader type RDM6300 (3) refused: only Wiegand is left",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.readertype": 3
+   },
+   "problem": "Reader 1 must be a Wiegand reader (MFRC522, PN532 and RDM6300 are no longer supported)"
+  },
+  {
+   "name": "reader type Wiegand + RDM6300 (5) refused: only Wiegand is left",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.readertype": 5
+   },
+   "problem": "Reader 1 must be a Wiegand reader (MFRC522, PN532 and RDM6300 are no longer supported)"
+  },
+  {
+   "name": "no reader type refused (upstream meant MFRC522)",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.readertype": null
+   },
+   "problem": "Reader 1 must be a Wiegand reader (MFRC522, PN532 and RDM6300 are no longer supported)"
+  },
+  {
+   "name": "RTC DS3231 on GPIO21/22 accepted",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "ntp.rtc": {
+     "type": 1,
+     "sdapin": 21,
+     "sclpin": 22
+    }
+   },
+   "problem": null,
+   "expect": {
+    "ntp.rtc.type": 1,
+    "ntp.rtc.sdapin": 21
+   }
+  },
+  {
+   "name": "RTC DS1307 with no pins stored accepted (GPIO21/22)",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "ntp.rtc": {
+     "type": 2
+    }
+   },
+   "problem": null
+  },
+  {
+   "name": "RTC SDA on the relay 1 pin",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "ntp.rtc": {
+     "type": 1,
+     "sdapin": 16,
+     "sclpin": 22
+    }
+   },
+   "problem": "GPIO 16 is used twice: Relay 1 and RTC SDA"
+  },
+  {
+   "name": "RTC on its default pins, relay 1 on GPIO21",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.rpin": 21,
+    "ntp.rtc": {
+     "type": 1
+    }
+   },
+   "problem": "GPIO 21 is used twice: Relay 1 and RTC SDA"
+  },
+  {
+   "name": "RTC SDA and SCL on one pin",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "ntp.rtc": {
+     "type": 1,
+     "sdapin": 21,
+     "sclpin": 21
+    }
+   },
+   "problem": "GPIO 21 is used twice: RTC SDA and RTC SCL"
+  },
+  {
+   "name": "RTC SCL on input-only GPIO34",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "ntp.rtc": {
+     "type": 1,
+     "sdapin": 21,
+     "sclpin": 34
+    }
+   },
+   "problem": "RTC SCL: GPIO 34 cannot be used as an output on this board"
+  },
+  {
+   "name": "RTC pins ignored while there is no RTC",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "ntp.rtc": {
+     "type": 0,
+     "sdapin": 16,
+     "sclpin": 16
+    }
+   },
+   "problem": null
+  },
+  {
+   "name": "RTC type 3 refused",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "ntp.rtc": {
+     "type": 3
+    }
+   },
+   "problem": "RTC type must be None, DS3231 or DS1307"
+  },
+  {
+   "name": "RTC type as a string \"1\" accepted",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "ntp.rtc": {
+     "type": "1",
+     "sdapin": 21,
+     "sclpin": 22
+    }
+   },
+   "problem": null
+  },
+  {
+   "name": "Wi-Fi idle-off ticked, 15 minutes",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "network.idleoff": 1,
+    "network.idlemins": 15
+   },
+   "problem": null
+  },
+  {
+   "name": "Wi-Fi idle-off 1 minute",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "network.idleoff": 1,
+    "network.idlemins": 1
+   },
+   "problem": null
+  },
+  {
+   "name": "Wi-Fi idle-off 1440 minutes (a day)",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "network.idleoff": 1,
+    "network.idlemins": 1440
+   },
+   "problem": null
+  },
+  {
+   "name": "Wi-Fi idle-off minutes as text",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "network.idleoff": "1",
+    "network.idlemins": "30"
+   },
+   "problem": null
+  },
+  {
+   "name": "Wi-Fi idle-off 0 minutes",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "network.idleoff": 1,
+    "network.idlemins": 0
+   },
+   "problem": "Turn Wi-Fi off after must be 1-1440 minutes"
+  },
+  {
+   "name": "Wi-Fi idle-off 1441 minutes",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "network.idleoff": 1,
+    "network.idlemins": 1441
+   },
+   "problem": "Turn Wi-Fi off after must be 1-1440 minutes"
+  },
+  {
+   "name": "Wi-Fi idle-off unticked still needs valid minutes",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "network.idleoff": 0,
+    "network.idlemins": -5
+   },
+   "problem": "Turn Wi-Fi off after must be 1-1440 minutes"
+  },
+  {
+   "name": "Wi-Fi idle-off not 0 or 1",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "network.idleoff": 2
+   },
+   "problem": "Turn Wi-Fi off when nobody is connected must be on or off"
+  },
+  {
+   "name": "no hardware section (the device ran with no doors or readers, H28.8)",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware": null
+   },
+   "problem": "The settings have no network or hardware section"
+  },
+  {
+   "name": "no network section",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "network": null
+   },
+   "problem": "The settings have no network or hardware section"
+  },
+  {
+   "name": "hardware section that is not an object",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware": "none"
+   },
+   "problem": "The settings have no network or hardware section"
+  },
+  {
+   "name": "Wi-Fi SSID of 32 characters",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "network.ssid": "ssssssssssssssssssssssssssssssss"
+   },
+   "problem": null
+  },
+  {
+   "name": "Wi-Fi SSID of 33 characters",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "network.ssid": "sssssssssssssssssssssssssssssssss"
+   },
+   "problem": "Wi-Fi SSID must be at most 32 characters"
+  },
+  {
+   "name": "Wi-Fi SSID of 17 two-byte characters (34 bytes)",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "network.ssid": "ééééééééééééééééé"
+   },
+   "problem": "Wi-Fi SSID must be at most 32 characters"
+  },
+  {
+   "name": "Wi-Fi password of 65 characters",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "network.pswd": "ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
+   },
+   "problem": "Wi-Fi password must be at most 64 characters"
+  },
+  {
+   "name": "host name with a hyphen",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "general.hostnm": "front-door-2"
+   },
+   "problem": null
+  },
+  {
+   "name": "host name with a space",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "general.hostnm": "front door"
+   },
+   "problem": "Host name must be at most 32 letters, digits and hyphens"
+  },
+  {
+   "name": "host name of 33 characters",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "general.hostnm": "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh"
+   },
+   "problem": "Host name must be at most 32 letters, digits and hyphens"
+  },
+  {
+   "name": "door name of 63 characters",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.doorname": "ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+   },
+   "problem": null
+  },
+  {
+   "name": "door name of 64 characters",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "hardware.doorname": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+   },
+   "problem": "Door names must be at most 63 characters"
+  },
+  {
+   "name": "MQTT port 1883",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "mqtt.port": 1883
+   },
+   "problem": null
+  },
+  {
+   "name": "MQTT port 70000",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "mqtt.port": 70000
+   },
+   "problem": "MQTT port must be 1-65535"
+  },
+  {
+   "name": "MQTT port 0",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "mqtt.port": 0
+   },
+   "problem": "MQTT port must be 1-65535"
+  },
+  {
+   "name": "MQTT port as text",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "mqtt.port": "abc"
+   },
+   "problem": "MQTT port must be 1-65535"
+  },
+  {
+   "name": "NTP interval 0 (the firmware default)",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "ntp.interval": 0
+   },
+   "problem": null
+  },
+  {
+   "name": "NTP interval 10080 minutes",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "ntp.interval": 10080
+   },
+   "problem": null
+  },
+  {
+   "name": "NTP interval -5",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "ntp.interval": -5
+   },
+   "problem": "NTP sync interval must be 0-10080 minutes"
+  },
+  {
+   "name": "NTP interval 10081",
+   "chip": "esp32",
+   "password": "Site-Door-2026",
+   "set": {
+    "ntp.interval": 10081
+   },
+   "problem": "NTP sync interval must be 0-10080 minutes"
+  }
+ ]
+}

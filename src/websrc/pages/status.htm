@@ -1,0 +1,60 @@
+<template id="statuscontent">
+<div>
+    <div id="apopenbanner" class="banner danger" hidden>
+        <svg class="icon"><use href="#i-alert"/></svg>
+        <div>The hotspot has no password: anyone nearby can reach the sign-in page.
+            <a href="#" data-onclick="showPage" data-arg="network">Set one under Wireless Network</a></div>
+    </div>
+    <div id="clockbanner" class="banner warning" hidden>
+        <svg class="icon"><use href="#i-clock"/></svg>
+        <div>The reader does not know the time (it forgets it at every power cut). Users with dates or opening hours are refused until it is set.</div>
+    </div>
+    <div id="setupcard" class="banner info" hidden>
+        <svg class="icon"><use href="#i-info"/></svg>
+        <div><b>This reader is not set up yet.</b> Open <a href="#" data-onclick="showPage" data-arg="hardware">Doors &amp; Readers</a>, check the doors and readers and press Save, then add people under <a href="#" data-onclick="showPage" data-arg="users">Users</a>.</div>
+    </div>
+    <div class="pagehead">
+        <h1 id="systemnamedevice"></h1>
+        <p>Ironframe RFID Access Control <strong id="sver"></strong></p>
+    </div>
+    <div class="tiles">
+        <div class="tile"><div class="label">Uptime</div><div class="value" id="uptime"></div></div>
+        <div class="tile" id="clocktile"><div class="label">Clock</div><div class="value" id="clockstate"></div></div>
+        <div class="tile"><div class="label">IP address</div><div class="value mono" id="ip"></div></div>
+        <div class="tile"><div class="label">Network</div><div class="value" id="ssidstat"></div></div>
+    </div>
+    <section class="card" id="doorscard" hidden>
+        <h2>Doors</h2>
+        <ul class="doorlist" id="doorlist"></ul>
+        <p class="hint" id="lastaccess"></p>
+    </section>
+    <section class="card">
+        <h2>Device</h2>
+        <dl class="kv">
+            <div><dt>Chip ID</dt><dd id="chip" class="mono"></dd></div>
+            <div><dt>CPU clock</dt><dd id="cpu"></dd></div>
+            <div><dt>Last restart</dt><dd id="resetreason"></dd></div>
+            <div id="wiegandnoiserow"><dt>Wiegand noise</dt><dd id="wiegandnoise"></dd></div>
+        </dl>
+    </section>
+    <section class="card">
+        <h2>Memory &amp; storage</h2>
+        <dl class="kv">
+            <div><dt>Free memory</dt><dd><span id="heap"></span><div class="meter"><span id="heapbar"></span></div></dd></div>
+            <div><dt>Largest free block</dt><dd id="heapmaxalloc"></dd></div>
+            <div><dt>Lowest free memory</dt><dd id="heapmin"></dd></div>
+            <div><dt>Free for updates</dt><dd><span id="flash"></span><div class="meter"><span id="flashbar"></span></div></dd></div>
+            <div><dt>Free storage</dt><dd><span id="spiffs"></span><div class="meter"><span id="spiffsbar"></span></div></dd></div>
+        </dl>
+    </section>
+    <section class="card">
+        <h2>Network</h2>
+        <dl class="kv">
+            <div><dt>Gateway</dt><dd id="gate" class="mono"></dd></div>
+            <div><dt>Mask</dt><dd id="mask" class="mono"></dd></div>
+            <div><dt>DNS</dt><dd id="dns" class="mono"></dd></div>
+            <div><dt>MAC</dt><dd id="mac" class="mono"></dd></div>
+        </dl>
+    </section>
+</div>
+</template>

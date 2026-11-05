@@ -1,0 +1,213 @@
+// The wall clock. The system time is set by SNTP (station mode), by the
+// browser (settime: a hotspot-only install has no NTP) or, at start,
+// by a battery-backed RTC module (Time page, core/rtc.h), and is trusted
+// once it is after 2016. clockLoop() reads it every 10 s and counts on
+// uptime in between.
+//
+// Trust order: NTP, then a time set in the browser, then the RTC read at
+// start. The RTC is read once, in setup(); it is written when the time
+// comes from NTP (first sync and every resync) or from the browser, never
+// polled from loop(). A clock set from the RTC counts as set, so the
+// browser's automatic set-if-unset leaves it alone.
+
+#include <Wire.h>
+
+void writeEvent(const char *type, const char *src, const char *desc, const char *data); // log.esp
+void writeEvent(const String &type, const String &src, const String &desc, const String &data);
+
+struct DeviceClock
+{
+	time_t epoch = 0;     // now, seconds UTC
+	tm local = {};        // epoch in the configured time zone (opening hours)
+	bool trusted = false; // false: dated and opening-hours users are refused
+	time_t baseEpoch = 0; // epoch at the last read of the system clock
+	uint64_t baseAt = 0;  // uptimeMs() then
+};
+DeviceClock deviceClock;
+
+static const time_t CLOCK_TRUSTED_FROM = 1451606400; // 2016-01-01
+static const uint32_t CLOCK_READ_EVERY_MS = 10000;
+
+// ---- the RTC module --------------------------------------------------------------
+static const char *rtcState = "off"; // status.rtc.state: off | ok | lost | missing
+static time_t rtcTime = 0;           // the time last read from or written to it
+static bool rtcPresent = false;      // it answered at start: writes go to it
+static volatile bool ntpSynced = false; // set by SNTP (its task), handled in clockLoop()
+static const uint16_t RTC_I2C_TIMEOUT_MS = 50;
+
+static bool rtcRead(uint8_t reg, uint8_t *buf, size_t n)
+{
+	Wire.beginTransmission(core::RTC_I2C_ADDRESS);
+	Wire.write(reg);
+	if (Wire.endTransmission(false) != 0)
+		return false;
+	if (Wire.requestFrom((uint16_t)core::RTC_I2C_ADDRESS, (uint8_t)n) != n)
+		return false;
+	for (size_t i = 0; i < n; i++)
+		buf[i] = (uint8_t)Wire.read();
+	return true;
+}
+
+static bool rtcWrite(uint8_t reg, const uint8_t *buf, size_t n)
+{
+	Wire.beginTransmission(core::RTC_I2C_ADDRESS);
+	Wire.write(reg);
+	Wire.write(buf, n);
+	return Wire.endTransmission() == 0;
+}
+
+static String utcText(time_t t);
+
+// Stores t (UTC) in the RTC and clears the DS3231's oscillator-stop flag.
+static void rtcStore(time_t t)
+{
+	if (!rtcPresent)
+		return;
+	uint8_t r[7];
+	core::rtcEncode(core::rtcFromEpoch((uint32_t)t), r);
+	bool ok = rtcWrite(0x00, r, sizeof(r));
+	uint8_t status = 0;
+	if (ok && config.rtcType == core::RTC_DS3231 && rtcRead(core::DS3231_STATUS_REG, &status, 1))
+	{
+		status &= (uint8_t)~core::DS3231_STATUS_OSF;
+		ok = rtcWrite(core::DS3231_STATUS_REG, &status, 1);
+	}
+	if (!ok)
+	{
+		writeEvent("WARN", "sys", "RTC write failed", "SDA " + String(config.rtcSda) + " / SCL " + String(config.rtcScl));
+		return;
+	}
+	rtcState = "ok";
+	rtcTime = t;
+}
+
+// SNTP's task: a sync (the first and every later one)
+static void ntpSyncNotify(struct timeval *tv)
+{
+	(void)tv;
+	ntpSynced = true;
+}
+
+// setup(), after the settings load: read the RTC once. A valid time sets
+// the clock (trusted at once); a lost one or no answer is logged and the
+// device carries on as without an RTC.
+void setupRtc()
+{
+	if (config.rtcType == core::RTC_NONE)
+		return;
+	sntp_set_time_sync_notification_cb(ntpSyncNotify);
+	String pins = "SDA " + String(config.rtcSda) + " / SCL " + String(config.rtcScl);
+	Wire.begin(config.rtcSda, config.rtcScl, 100000);
+	Wire.setTimeOut(RTC_I2C_TIMEOUT_MS);
+	uint8_t r[7];
+	uint8_t status = 0;
+	if (!rtcRead(0x00, r, sizeof(r)) || (config.rtcType == core::RTC_DS3231 && !rtcRead(core::DS3231_STATUS_REG, &status, 1)))
+	{
+		rtcState = "missing";
+		writeEvent("WARN", "sys", "RTC not found on " + pins, "check the wiring and its 3.3 V supply");
+		return;
+	}
+	rtcPresent = true;
+	core::RtcTime t = core::rtcDecode(r);
+	if (core::rtcStopped(config.rtcType, r, status) || !core::rtcTimeValid(t))
+	{
+		rtcState = "lost";
+		writeEvent("WARN", "sys", "RTC lost the time (battery?)", "it is set again from NTP or the browser");
+		return;
+	}
+	time_t e = (time_t)core::rtcToEpoch(t);
+	struct timeval tv = {e, 0};
+	settimeofday(&tv, NULL);
+	DeviceClock &c = deviceClock;
+	c.epoch = c.baseEpoch = e;
+	c.baseAt = uptimeMs();
+	localtime_r(&c.epoch, &c.local);
+	c.trusted = true;
+	rtcState = "ok";
+	rtcTime = e;
+	writeEvent("INFO", "sys", "Time set from RTC", utcText(e) + " UTC");
+}
+
+// status.rtc
+void rtcStatus(JsonObject out)
+{
+	out["state"] = rtcState;
+	out["time"] = (uint32_t)rtcTime;
+}
+
+// Called from loop().
+void clockLoop()
+{
+	DeviceClock &c = deviceClock;
+	uint64_t now = uptimeMs();
+	if (now - c.baseAt < CLOCK_READ_EVERY_MS)
+	{
+		c.epoch = c.baseEpoch + (time_t)((now - c.baseAt) / 1000);
+		return;
+	}
+	if (ntpSynced)
+	{
+		// NTP answered: it wins over the browser and the RTC, and the RTC keeps it
+		ntpSynced = false;
+		time_t synced;
+		time(&synced);
+		if (synced >= CLOCK_TRUSTED_FROM)
+			rtcStore(synced);
+	}
+	time_t previous = c.epoch;
+	time(&c.epoch);
+	c.baseAt = now;
+	localtime_r(&c.epoch, &c.local);
+	if (c.epoch < CLOCK_TRUSTED_FROM)
+	{
+		// not set (no NTP answer, no browser yet): keep counting from the
+		// time set by hand, if any (upstream snapped back to the old base)
+		c.epoch = previous;
+		c.baseEpoch = c.epoch;
+		return;
+	}
+	c.baseEpoch = c.epoch;
+	if (!c.trusted)
+		writeEvent("INFO", "sys", "Time set", "from NTP");
+	c.trusted = true;
+}
+
+static String utcText(time_t t)
+{
+	tm u;
+	gmtime_r(&t, &u);
+	char text[24];
+	strftime(text, sizeof(text), "%Y-%m-%d %H:%M:%S", &u);
+	return text;
+}
+
+// settime from the web UI; from: who sent it (the browser's address).
+void setClockFromBrowser(time_t t, const String &from)
+{
+	DeviceClock &c = deviceClock;
+	// a missing or pre-2016 time set the clock and marked it untrusted, so a
+	// good clock lost its trust and dated and opening-hours users were refused
+	// until NTP answered, on a hotspot-only site never (review 7)
+	if (t <= CLOCK_TRUSTED_FROM)
+	{
+		writeEvent("WARN", "sys", "Time from the browser ignored", String("not a valid time (") + (long)t + "), from " + from);
+		return;
+	}
+	time_t before = c.epoch;
+	struct timeval tv = {t, 0};
+	settimeofday(&tv, NULL); // so time() agrees until NTP takes over
+	c.epoch = t;
+	c.baseEpoch = t;
+	c.baseAt = uptimeMs();
+	localtime_r(&c.epoch, &c.local);
+	bool wasTrusted = c.trusted;
+	c.trusted = t > CLOCK_TRUSTED_FROM;
+	if (c.trusted)
+		rtcStore(t); // the RTC keeps it through the next power cut
+	if (c.trusted && !wasTrusted)
+		writeEvent("INFO", "sys", "Time set", "from the browser " + from);
+	else if (wasTrusted)
+		// a set clock moved by hand: it decides which dated and opening-hours
+		// users get in, and the time of every later log entry
+		writeEvent("INFO", "sys", "Time changed from the browser", utcText(before) + " to " + utcText(t) + " UTC, by " + from);
+}

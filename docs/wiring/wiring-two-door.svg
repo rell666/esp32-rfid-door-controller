@@ -1,0 +1,388 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1180" viewBox="0 0 2000 1180" font-family="DejaVu Sans, Helvetica, Arial, sans-serif">
+<rect width="2000" height="1180" fill="#fff"/>
+<rect x="10" y="10" width="1980" height="1160" fill="none" stroke="#333" stroke-width="2"/>
+<text x="40" y="50" font-size="24" text-anchor="start" font-weight="bold" fill="#222">Ironframe RFID — two-door wiring</text>
+<text x="40" y="74" font-size="14" text-anchor="start" font-weight="normal" fill="#444">VOANZO ESP32 2-relay board, two Wiegand readers, level shifter, two maglocks on NO (firmware 1.7 preset)</text>
+<rect x="40" y="110" width="170" height="130" rx="6" fill="#f7f7f7" stroke="#333" stroke-width="1.6"/>
+<text x="125.0" y="130" font-size="14" text-anchor="middle" font-weight="bold" fill="#222">12 V DC PSU</text>
+<text x="125.0" y="147" font-size="11.5" text-anchor="middle" font-weight="normal" fill="#555">readers + board + locks</text>
+<circle cx="210" cy="175" r="4" fill="#fff" stroke="#d62728" stroke-width="1.8"/>
+<text x="201" y="179.5" font-size="12" text-anchor="end" font-weight="normal" fill="#222">+12 V</text>
+<circle cx="210" cy="215" r="4" fill="#fff" stroke="#222" stroke-width="1.8"/>
+<text x="201" y="219.5" font-size="12" text-anchor="end" font-weight="normal" fill="#222">0 V</text>
+<polyline points="214,175 250,175" fill="none" stroke="#d62728" stroke-width="2.6" stroke-linejoin="round"/>
+<circle cx="250" cy="175" r="4.5" fill="#d62728"/>
+<polyline points="250,175 290,175" fill="none" stroke="#d62728" stroke-width="2.6" stroke-linejoin="round"/>
+<rect x="290" y="167" width="44" height="16" fill="#fff" stroke="#333" stroke-width="1.6"/>
+<line x1="290" y1="175" x2="334" y2="175" stroke="#333" stroke-width="1.2"/>
+<text x="312" y="161" font-size="12" text-anchor="middle" font-weight="bold" fill="#222">F1 1 A</text>
+<polyline points="334,175 370,175" fill="none" stroke="#d62728" stroke-width="2.6" stroke-linejoin="round"/>
+<polygon points="370,175 380,164 472.0,164 472.0,186 380,186" fill="#fff" stroke="#d62728" stroke-width="1.8"/>
+<text x="384" y="179.5" font-size="12" text-anchor="start" font-weight="bold" fill="#d62728">+12V LOGIC</text>
+<text x="290" y="205" font-size="11" text-anchor="start" font-weight="normal" fill="#555">controller + readers</text>
+<polyline points="214,215 232,215 232,232" fill="none" stroke="#222" stroke-width="2.6" stroke-linejoin="round"/>
+<polyline points="232,232 232,244" fill="none" stroke="#222" stroke-width="2" stroke-linejoin="round"/>
+<line x1="221" y1="244.0" x2="243" y2="244.0" stroke="#222" stroke-width="2"/>
+<line x1="225" y1="248.5" x2="239" y2="248.5" stroke="#222" stroke-width="2"/>
+<line x1="229" y1="253.0" x2="235" y2="253.0" stroke="#222" stroke-width="2"/>
+<polyline points="250,175 250,340 270,340" fill="none" stroke="#d62728" stroke-width="2.6" stroke-linejoin="round"/>
+<rect x="270" y="332" width="44" height="16" fill="#fff" stroke="#333" stroke-width="1.6"/>
+<line x1="270" y1="340" x2="314" y2="340" stroke="#333" stroke-width="1.2"/>
+<text x="292" y="326" font-size="12" text-anchor="middle" font-weight="bold" fill="#222"></text>
+<text x="292" y="372" font-size="12" text-anchor="middle" font-weight="bold" fill="#222">F2 (locks)</text>
+<polyline points="314,340 355,340" fill="none" stroke="#d62728" stroke-width="2.6" stroke-linejoin="round"/>
+<line x1="355" y1="340" x2="373" y2="340" stroke="#d62728" stroke-width="2.6"/>
+<line x1="397" y1="340" x2="415" y2="340" stroke="#d62728" stroke-width="2.6"/>
+<line x1="373" y1="340" x2="399" y2="348" stroke="#222" stroke-width="2.2"/>
+<line x1="397" y1="340" x2="397" y2="352" stroke="#222" stroke-width="2"/>
+<text x="385" y="328" font-size="12" text-anchor="middle" font-weight="bold" fill="#222">Fire-alarm relay</text>
+<text x="385" y="370" font-size="11" text-anchor="middle" font-weight="normal" fill="#555">opens on alarm</text>
+<polyline points="415,340 455,340" fill="none" stroke="#d62728" stroke-width="2.6" stroke-linejoin="round"/>
+<line x1="455" y1="340" x2="473" y2="340" stroke="#d62728" stroke-width="2.6"/>
+<line x1="497" y1="340" x2="515" y2="340" stroke="#d62728" stroke-width="2.6"/>
+<line x1="473" y1="340" x2="499" y2="348" stroke="#222" stroke-width="2.2"/>
+<line x1="497" y1="340" x2="497" y2="352" stroke="#222" stroke-width="2"/>
+<text x="485" y="328" font-size="12" text-anchor="middle" font-weight="bold" fill="#222">Break-glass</text>
+<text x="485" y="370" font-size="11" text-anchor="middle" font-weight="normal" fill="#555">green, NC</text>
+<polyline points="515,340 525,340" fill="none" stroke="#d62728" stroke-width="2.6" stroke-linejoin="round"/>
+<polygon points="525,340 535,329 627.0,329 627.0,351 535,351" fill="#fff" stroke="#d62728" stroke-width="1.8"/>
+<text x="539" y="344.5" font-size="12" text-anchor="start" font-weight="bold" fill="#d62728">+12V LOCKS</text>
+<text x="60" y="412" font-size="12" text-anchor="start" font-weight="normal" fill="#333">The maglock supply goes through the fire-alarm relay and the</text>
+<text x="60" y="430" font-size="12" text-anchor="start" font-weight="normal" fill="#333">break-glass unit, so the doors release whatever the controller does.</text>
+<rect x="640" y="110" width="440" height="460" rx="6" fill="#eef4fb" stroke="#333" stroke-width="1.6"/>
+<text x="860.0" y="130" font-size="14" text-anchor="middle" font-weight="bold" fill="#222">VOANZO ESP32 2-channel relay board</text>
+<text x="860.0" y="147" font-size="11.5" text-anchor="middle" font-weight="normal" fill="#555">Amazon UK B0DS6SB1XB · ESP32-WROOM-32E</text>
+<circle cx="640" cy="210" r="4" fill="#fff" stroke="#d62728" stroke-width="1.8"/>
+<text x="649" y="214.5" font-size="12" text-anchor="start" font-weight="normal" fill="#222">DC IN +</text>
+<circle cx="640" cy="260" r="4" fill="#fff" stroke="#222" stroke-width="1.8"/>
+<text x="649" y="264.5" font-size="12" text-anchor="start" font-weight="normal" fill="#222">DC IN −</text>
+<polyline points="636,210 600,210" fill="none" stroke="#d62728" stroke-width="2.6" stroke-linejoin="round"/>
+<polygon points="600,210 590,199 498.0,199 498.0,221 590,221" fill="#fff" stroke="#d62728" stroke-width="1.8"/>
+<text x="586" y="214.5" font-size="12" text-anchor="end" font-weight="bold" fill="#d62728">+12V LOGIC</text>
+<polyline points="636,260 600,260 600,276" fill="none" stroke="#222" stroke-width="2.6" stroke-linejoin="round"/>
+<polyline points="600,276 600,288" fill="none" stroke="#222" stroke-width="2" stroke-linejoin="round"/>
+<line x1="589" y1="288.0" x2="611" y2="288.0" stroke="#222" stroke-width="2"/>
+<line x1="593" y1="292.5" x2="607" y2="292.5" stroke="#222" stroke-width="2"/>
+<line x1="597" y1="297.0" x2="603" y2="297.0" stroke="#222" stroke-width="2"/>
+<rect x="790" y="180" width="160" height="110" rx="4" fill="#fff" stroke="#555" stroke-width="1.4"/>
+<text x="870" y="230" font-size="13" text-anchor="middle" font-weight="bold" fill="#222">ESP32-WROOM-32E</text>
+<text x="870" y="250" font-size="11" text-anchor="middle" font-weight="normal" fill="#555">LED GPIO23 · BOOT GPIO0</text>
+<rect x="680" y="300" width="110" height="80" rx="4" fill="#fff" stroke="#555" stroke-width="1.2" stroke-dasharray="5 3"/>
+<text x="735" y="322" font-size="12" text-anchor="middle" font-weight="bold" fill="#222">P4 serial</text>
+<text x="735" y="340" font-size="11" text-anchor="middle" font-weight="normal" fill="#555">IO0 GND GND</text>
+<text x="735" y="355" font-size="11" text-anchor="middle" font-weight="normal" fill="#555">RX TX 5V</text>
+<text x="735" y="371" font-size="11" text-anchor="middle" font-weight="normal" fill="#555" font-style="italic">flashing only</text>
+<rect x="670" y="410" width="170" height="90" rx="4" fill="#fff" stroke="#555" stroke-width="1.4"/>
+<text x="755" y="440" font-size="13" text-anchor="middle" font-weight="bold" fill="#222">Relay 1 — GPIO16</text>
+<text x="755" y="460" font-size="11" text-anchor="middle" font-weight="normal" fill="#555">10 A, active high</text>
+<text x="755" y="478" font-size="11" text-anchor="middle" font-weight="normal" fill="#555">door 1</text>
+<rect x="870" y="410" width="170" height="90" rx="4" fill="#fff" stroke="#555" stroke-width="1.4"/>
+<text x="955" y="440" font-size="13" text-anchor="middle" font-weight="bold" fill="#222">Relay 2 — GPIO17</text>
+<text x="955" y="460" font-size="11" text-anchor="middle" font-weight="normal" fill="#555">10 A, active high</text>
+<text x="955" y="478" font-size="11" text-anchor="middle" font-weight="normal" fill="#555">door 2</text>
+<circle cx="690" cy="570" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="690" y="560" font-size="12" text-anchor="middle" font-weight="normal" fill="#222">NO</text>
+<circle cx="755" cy="570" r="4" fill="#fff" stroke="#d62728" stroke-width="1.8"/>
+<text x="755" y="560" font-size="12" text-anchor="middle" font-weight="normal" fill="#222">COM</text>
+<circle cx="820" cy="570" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="820" y="560" font-size="12" text-anchor="middle" font-weight="normal" fill="#222">NC</text>
+<circle cx="890" cy="570" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="890" y="560" font-size="12" text-anchor="middle" font-weight="normal" fill="#222">NO</text>
+<circle cx="955" cy="570" r="4" fill="#fff" stroke="#d62728" stroke-width="1.8"/>
+<text x="955" y="560" font-size="12" text-anchor="middle" font-weight="normal" fill="#222">COM</text>
+<circle cx="1020" cy="570" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1020" y="560" font-size="12" text-anchor="middle" font-weight="normal" fill="#222">NC</text>
+<rect x="1034" y="230" width="40" height="250" rx="3" fill="#333"/>
+<circle cx="1044" cy="245.0" r="4" fill="#d4af37"/>
+<circle cx="1064" cy="245.0" r="4" fill="#d4af37"/>
+<circle cx="1044" cy="269.5" r="4" fill="#d4af37"/>
+<circle cx="1064" cy="269.5" r="4" fill="#d4af37"/>
+<circle cx="1044" cy="294.0" r="4" fill="#d4af37"/>
+<circle cx="1064" cy="294.0" r="4" fill="#d4af37"/>
+<circle cx="1044" cy="318.5" r="4" fill="#d4af37"/>
+<circle cx="1064" cy="318.5" r="4" fill="#d4af37"/>
+<circle cx="1044" cy="343.0" r="4" fill="#d4af37"/>
+<circle cx="1064" cy="343.0" r="4" fill="#d4af37"/>
+<circle cx="1044" cy="367.5" r="4" fill="#d4af37"/>
+<circle cx="1064" cy="367.5" r="4" fill="#d4af37"/>
+<circle cx="1044" cy="392.0" r="4" fill="#d4af37"/>
+<circle cx="1064" cy="392.0" r="4" fill="#d4af37"/>
+<circle cx="1044" cy="416.5" r="4" fill="#d4af37"/>
+<circle cx="1064" cy="416.5" r="4" fill="#d4af37"/>
+<circle cx="1044" cy="441.0" r="4" fill="#d4af37"/>
+<circle cx="1064" cy="441.0" r="4" fill="#d4af37"/>
+<circle cx="1044" cy="465.5" r="4" fill="#d4af37"/>
+<circle cx="1064" cy="465.5" r="4" fill="#d4af37"/>
+<text x="1024" y="360" font-size="12" text-anchor="end" font-weight="bold" fill="#222">2×10 GPIO header</text>
+<text x="1024" y="377" font-size="11" text-anchor="end" font-weight="normal" fill="#555">(board edge)</text>
+<polygon points="1080,240 1170,225 1170,505 1080,470" fill="#bbb" stroke="#888" stroke-width="1"/>
+<line x1="1080" y1="263" x2="1170" y2="253" stroke="#999" stroke-width="0.8"/>
+<line x1="1080" y1="286" x2="1170" y2="281" stroke="#999" stroke-width="0.8"/>
+<line x1="1080" y1="309" x2="1170" y2="309" stroke="#999" stroke-width="0.8"/>
+<line x1="1080" y1="332" x2="1170" y2="337" stroke="#999" stroke-width="0.8"/>
+<line x1="1080" y1="355" x2="1170" y2="365" stroke="#999" stroke-width="0.8"/>
+<line x1="1080" y1="378" x2="1170" y2="393" stroke="#999" stroke-width="0.8"/>
+<line x1="1080" y1="401" x2="1170" y2="421" stroke="#999" stroke-width="0.8"/>
+<line x1="1080" y1="424" x2="1170" y2="449" stroke="#999" stroke-width="0.8"/>
+<line x1="1080" y1="447" x2="1170" y2="477" stroke="#999" stroke-width="0.8"/>
+<text x="1125.0" y="520" font-size="12" text-anchor="middle" font-weight="bold" fill="#222">20-way</text>
+<text x="1125.0" y="535" font-size="12" text-anchor="middle" font-weight="bold" fill="#222">ribbon</text>
+<text x="1125.0" y="551" font-size="11" text-anchor="middle" font-weight="normal" fill="#555">B07SC19QC3</text>
+<rect x="1170" y="110" width="200" height="500" rx="6" fill="#f3f7ee" stroke="#333" stroke-width="1.6"/>
+<text x="1270.0" y="130" font-size="14" text-anchor="middle" font-weight="bold" fill="#222">IDC20 breakout</text>
+<text x="1270.0" y="147" font-size="11.5" text-anchor="middle" font-weight="normal" fill="#555">B07V4LLMSP · DIN rail</text>
+<circle cx="1370" cy="240" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1361" y="244.5" font-size="12" text-anchor="end" font-weight="normal" fill="#222">G34</text>
+<text x="1184" y="244" font-size="11" text-anchor="start" font-weight="normal" fill="#777">row 3</text>
+<circle cx="1370" cy="270" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1361" y="274.5" font-size="12" text-anchor="end" font-weight="normal" fill="#222">G35</text>
+<text x="1184" y="274" font-size="11" text-anchor="start" font-weight="normal" fill="#777">row 4</text>
+<circle cx="1370" cy="300" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1361" y="304.5" font-size="12" text-anchor="end" font-weight="normal" fill="#222">G32</text>
+<text x="1184" y="304" font-size="11" text-anchor="start" font-weight="normal" fill="#777">row 4</text>
+<circle cx="1370" cy="330" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1361" y="334.5" font-size="12" text-anchor="end" font-weight="normal" fill="#222">G33</text>
+<text x="1184" y="334" font-size="11" text-anchor="start" font-weight="normal" fill="#777">row 5</text>
+<circle cx="1370" cy="370" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1361" y="374.5" font-size="12" text-anchor="end" font-weight="normal" fill="#222">3V3</text>
+<text x="1184" y="374" font-size="11" text-anchor="start" font-weight="normal" fill="#777">row 1</text>
+<circle cx="1370" cy="400" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1361" y="404.5" font-size="12" text-anchor="end" font-weight="normal" fill="#222">GND</text>
+<text x="1184" y="404" font-size="11" text-anchor="start" font-weight="normal" fill="#777">row 1</text>
+<circle cx="1370" cy="440" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1361" y="444.5" font-size="12" text-anchor="end" font-weight="normal" fill="#222">5V</text>
+<text x="1184" y="444" font-size="11" text-anchor="start" font-weight="normal" fill="#777">row 10</text>
+<circle cx="1370" cy="470" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1361" y="474.5" font-size="12" text-anchor="end" font-weight="normal" fill="#222">GND</text>
+<text x="1184" y="474" font-size="11" text-anchor="start" font-weight="normal" fill="#777">row 10</text>
+<circle cx="1370" cy="510" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1361" y="514.5" font-size="12" text-anchor="end" font-weight="normal" fill="#222">G13</text>
+<text x="1184" y="514" font-size="11" text-anchor="start" font-weight="normal" fill="#777">row 8</text>
+<text x="1184" y="160" font-size="11" text-anchor="start" font-weight="normal" fill="#555">header row shown left;</text>
+<text x="1184" y="175" font-size="11" text-anchor="start" font-weight="normal" fill="#555">terminal numbers depend</text>
+<text x="1184" y="190" font-size="11" text-anchor="start" font-weight="normal" fill="#555">on the ribbon's way round:</text>
+<text x="1184" y="205" font-size="11" text-anchor="start" font-weight="bold" fill="#555">check with a meter</text>
+<text x="1184" y="560" font-size="11" text-anchor="start" font-weight="bold" fill="#d62728">never connect: EN, G12,</text>
+<text x="1184" y="575" font-size="11" text-anchor="start" font-weight="bold" fill="#d62728">SD2, SD3, CMD, SVP, SVN</text>
+<rect x="1460" y="165" width="180" height="260" rx="6" fill="#fdf3e7" stroke="#333" stroke-width="1.6"/>
+<text x="1550.0" y="185" font-size="14" text-anchor="middle" font-weight="bold" fill="#222">Level shifter</text>
+<text x="1550.0" y="202" font-size="11.5" text-anchor="middle" font-weight="normal" fill="#555">B07RY15XMJ · BSS138 4-ch</text>
+<circle cx="1460" cy="240" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1469" y="244.5" font-size="12" text-anchor="start" font-weight="normal" fill="#222">LV1</text>
+<circle cx="1460" cy="270" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1469" y="274.5" font-size="12" text-anchor="start" font-weight="normal" fill="#222">LV2</text>
+<circle cx="1460" cy="300" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1469" y="304.5" font-size="12" text-anchor="start" font-weight="normal" fill="#222">LV3</text>
+<circle cx="1460" cy="330" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1469" y="334.5" font-size="12" text-anchor="start" font-weight="normal" fill="#222">LV4</text>
+<circle cx="1460" cy="370" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1469" y="374.5" font-size="12" text-anchor="start" font-weight="normal" fill="#222">LV</text>
+<circle cx="1460" cy="400" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1469" y="404.5" font-size="12" text-anchor="start" font-weight="normal" fill="#222">GND</text>
+<circle cx="1640" cy="240" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1631" y="244.5" font-size="12" text-anchor="end" font-weight="normal" fill="#222">HV1</text>
+<circle cx="1640" cy="270" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1631" y="274.5" font-size="12" text-anchor="end" font-weight="normal" fill="#222">HV2</text>
+<circle cx="1640" cy="300" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1631" y="304.5" font-size="12" text-anchor="end" font-weight="normal" fill="#222">HV3</text>
+<circle cx="1640" cy="330" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1631" y="334.5" font-size="12" text-anchor="end" font-weight="normal" fill="#222">HV4</text>
+<circle cx="1640" cy="370" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1631" y="374.5" font-size="12" text-anchor="end" font-weight="normal" fill="#222">HV</text>
+<circle cx="1640" cy="400" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1631" y="404.5" font-size="12" text-anchor="end" font-weight="normal" fill="#222">GND</text>
+<text x="1470" y="222" font-size="11" text-anchor="start" font-weight="normal" fill="#555" font-style="italic">3.3 V side</text>
+<text x="1630" y="222" font-size="11" text-anchor="end" font-weight="normal" fill="#555" font-style="italic">5 V side</text>
+<polyline points="1374,240 1456,240" fill="none" stroke="#1f9e3a" stroke-width="2.6" stroke-linejoin="round"/>
+<polyline points="1374,270 1456,270" fill="none" stroke="#333" stroke-width="5.0" stroke-linejoin="round"/>
+<polyline points="1374,270 1456,270" fill="none" stroke="#fff" stroke-width="2.6" stroke-linejoin="round"/>
+<polyline points="1374,300 1456,300" fill="none" stroke="#1f9e3a" stroke-width="2.6" stroke-linejoin="round"/>
+<polyline points="1374,330 1456,330" fill="none" stroke="#333" stroke-width="5.0" stroke-linejoin="round"/>
+<polyline points="1374,330 1456,330" fill="none" stroke="#fff" stroke-width="2.6" stroke-linejoin="round"/>
+<polyline points="1374,370 1456,370" fill="none" stroke="#8e44ad" stroke-width="2.6" stroke-linejoin="round"/>
+<polyline points="1374,400 1456,400" fill="none" stroke="#222" stroke-width="2.6" stroke-linejoin="round"/>
+<polyline points="1374,440 1670,440 1670,370 1644,370" fill="none" stroke="#ff7f0e" stroke-width="2.6" stroke-linejoin="round"/>
+<polyline points="1374,470 1420,470" fill="none" stroke="#222" stroke-width="2.6" stroke-linejoin="round"/>
+<polyline points="1374,510 1420,510" fill="none" stroke="#777" stroke-width="2.6" stroke-linejoin="round"/>
+<polyline points="1420,470 1420,482.0" fill="none" stroke="#777" stroke-width="2.4" stroke-linejoin="round"/>
+<polyline points="1420,498.0 1420,510" fill="none" stroke="#777" stroke-width="2.4" stroke-linejoin="round"/>
+<line x1="1408" y1="482.0" x2="1408" y2="498.0" stroke="#222" stroke-width="2.4"/>
+<line x1="1408" y1="490.0" x2="1394" y2="490.0" stroke="#222" stroke-width="2"/>
+<line x1="1394" y1="484.0" x2="1394" y2="496.0" stroke="#222" stroke-width="2"/>
+<text x="1432" y="486.0" font-size="12" text-anchor="start" font-weight="bold" fill="#222">Exit button, door 1</text>
+<text x="1432" y="502.0" font-size="11" text-anchor="start" font-weight="normal" fill="#555">normally open; to GND, never 5 V</text>
+<rect x="1740" y="120" width="180" height="230" rx="6" fill="#f0f0f5" stroke="#333" stroke-width="1.6"/>
+<text x="1830.0" y="140" font-size="14" text-anchor="middle" font-weight="bold" fill="#222">Reader 1 — door 1</text>
+<text x="1830.0" y="157" font-size="11.5" text-anchor="middle" font-weight="normal" fill="#555">Wiegand · B0HG1Z4PRL</text>
+<circle cx="1740" cy="190" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1749" y="194.5" font-size="12" text-anchor="start" font-weight="normal" fill="#222">LED</text>
+<circle cx="1740" cy="212" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1749" y="216.5" font-size="12" text-anchor="start" font-weight="normal" fill="#222">BEEP</text>
+<circle cx="1740" cy="240" r="4" fill="#fff" stroke="#1f9e3a" stroke-width="1.8"/>
+<text x="1749" y="244.5" font-size="12" text-anchor="start" font-weight="normal" fill="#222">D0 green</text>
+<circle cx="1740" cy="270" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1749" y="274.5" font-size="12" text-anchor="start" font-weight="normal" fill="#222">D1 white</text>
+<circle cx="1920" cy="300" r="4" fill="#fff" stroke="#d62728" stroke-width="1.8"/>
+<text x="1911" y="304.5" font-size="12" text-anchor="end" font-weight="normal" fill="#222">+12V red</text>
+<circle cx="1920" cy="330" r="4" fill="#fff" stroke="#222" stroke-width="1.8"/>
+<text x="1911" y="334.5" font-size="12" text-anchor="end" font-weight="normal" fill="#222">GND black</text>
+<polyline points="1644,240 1736,240" fill="none" stroke="#1f9e3a" stroke-width="2.6" stroke-linejoin="round"/>
+<polyline points="1644,270 1736,270" fill="none" stroke="#333" stroke-width="5.0" stroke-linejoin="round"/>
+<polyline points="1644,270 1736,270" fill="none" stroke="#fff" stroke-width="2.6" stroke-linejoin="round"/>
+<rect x="1740" y="420" width="180" height="230" rx="6" fill="#f0f0f5" stroke="#333" stroke-width="1.6"/>
+<text x="1830.0" y="440" font-size="14" text-anchor="middle" font-weight="bold" fill="#222">Reader 2 — door 2</text>
+<text x="1830.0" y="457" font-size="11.5" text-anchor="middle" font-weight="normal" fill="#555">Wiegand · B0HG1Z4PRL</text>
+<circle cx="1740" cy="490" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1749" y="494.5" font-size="12" text-anchor="start" font-weight="normal" fill="#222">LED</text>
+<circle cx="1740" cy="512" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1749" y="516.5" font-size="12" text-anchor="start" font-weight="normal" fill="#222">BEEP</text>
+<circle cx="1740" cy="540" r="4" fill="#fff" stroke="#1f9e3a" stroke-width="1.8"/>
+<text x="1749" y="544.5" font-size="12" text-anchor="start" font-weight="normal" fill="#222">D0 green</text>
+<circle cx="1740" cy="570" r="4" fill="#fff" stroke="#333" stroke-width="1.8"/>
+<text x="1749" y="574.5" font-size="12" text-anchor="start" font-weight="normal" fill="#222">D1 white</text>
+<circle cx="1920" cy="600" r="4" fill="#fff" stroke="#d62728" stroke-width="1.8"/>
+<text x="1911" y="604.5" font-size="12" text-anchor="end" font-weight="normal" fill="#222">+12V red</text>
+<circle cx="1920" cy="630" r="4" fill="#fff" stroke="#222" stroke-width="1.8"/>
+<text x="1911" y="634.5" font-size="12" text-anchor="end" font-weight="normal" fill="#222">GND black</text>
+<polyline points="1644,300 1700,300 1700,540 1736,540" fill="none" stroke="#1f9e3a" stroke-width="2.6" stroke-linejoin="round"/>
+<polyline points="1644,330 1685,330 1685,570 1736,570" fill="none" stroke="#333" stroke-width="5.0" stroke-linejoin="round"/>
+<polyline points="1644,330 1685,330 1685,570 1736,570" fill="none" stroke="#fff" stroke-width="2.6" stroke-linejoin="round"/>
+<line x1="1736" y1="190" x2="1718" y2="190" stroke="#999" stroke-width="2" stroke-dasharray="4 3"/>
+<path d="M1712,185 l10,10 M1712,195 l10,-10" stroke="#999" stroke-width="2"/>
+<line x1="1736" y1="212" x2="1718" y2="212" stroke="#999" stroke-width="2" stroke-dasharray="4 3"/>
+<path d="M1712,207 l10,10 M1712,217 l10,-10" stroke="#999" stroke-width="2"/>
+<line x1="1736" y1="490" x2="1718" y2="490" stroke="#999" stroke-width="2" stroke-dasharray="4 3"/>
+<path d="M1712,485 l10,10 M1712,495 l10,-10" stroke="#999" stroke-width="2"/>
+<line x1="1736" y1="512" x2="1718" y2="512" stroke="#999" stroke-width="2" stroke-dasharray="4 3"/>
+<path d="M1712,507 l10,10 M1712,517 l10,-10" stroke="#999" stroke-width="2"/>
+<text x="1706" y="140" font-size="11" text-anchor="end" font-weight="normal" fill="#888" font-style="italic">LED / BEEP not connected</text>
+<text x="1706" y="154" font-size="11" text-anchor="end" font-weight="normal" fill="#888" font-style="italic">(each needs an NPN / ULN2003 driver)</text>
+<polyline points="1924,300 1936,300 1936,274" fill="none" stroke="#d62728" stroke-width="2.6" stroke-linejoin="round"/>
+<rect x="1890.0" y="248" width="92.0" height="22" rx="3" fill="#fff" stroke="#d62728" stroke-width="1.8"/>
+<text x="1936" y="264" font-size="12" text-anchor="middle" font-weight="bold" fill="#d62728">+12V LOGIC</text>
+<polyline points="1924,330 1936,330 1936,334" fill="none" stroke="#222" stroke-width="2.6" stroke-linejoin="round"/>
+<polyline points="1936,334 1936,346" fill="none" stroke="#222" stroke-width="2" stroke-linejoin="round"/>
+<line x1="1925" y1="346.0" x2="1947" y2="346.0" stroke="#222" stroke-width="2"/>
+<line x1="1929" y1="350.5" x2="1943" y2="350.5" stroke="#222" stroke-width="2"/>
+<line x1="1933" y1="355.0" x2="1939" y2="355.0" stroke="#222" stroke-width="2"/>
+<polyline points="1924,600 1936,600 1936,574" fill="none" stroke="#d62728" stroke-width="2.6" stroke-linejoin="round"/>
+<rect x="1890.0" y="548" width="92.0" height="22" rx="3" fill="#fff" stroke="#d62728" stroke-width="1.8"/>
+<text x="1936" y="564" font-size="12" text-anchor="middle" font-weight="bold" fill="#d62728">+12V LOGIC</text>
+<polyline points="1924,630 1936,630 1936,634" fill="none" stroke="#222" stroke-width="2.6" stroke-linejoin="round"/>
+<polyline points="1936,634 1936,646" fill="none" stroke="#222" stroke-width="2" stroke-linejoin="round"/>
+<line x1="1925" y1="646.0" x2="1947" y2="646.0" stroke="#222" stroke-width="2"/>
+<line x1="1929" y1="650.5" x2="1943" y2="650.5" stroke="#222" stroke-width="2"/>
+<line x1="1933" y1="655.0" x2="1939" y2="655.0" stroke="#222" stroke-width="2"/>
+<text x="1830.0" y="375" font-size="11" text-anchor="middle" font-weight="normal" fill="#555">Set the reader to Wiegand output</text>
+<text x="1830.0" y="390" font-size="11" text-anchor="middle" font-weight="normal" fill="#555">(master code, see its manual)</text>
+<polyline points="755,574 755,630" fill="none" stroke="#d62728" stroke-width="2.6" stroke-linejoin="round"/>
+<rect x="705" y="630" width="100" height="22" rx="3" fill="#fff" stroke="#d62728" stroke-width="1.8"/>
+<text x="755" y="646" font-size="12" text-anchor="middle" font-weight="bold" fill="#d62728">+12V LOCKS</text>
+<line x1="820" y1="574" x2="820" y2="592" stroke="#999" stroke-width="2" stroke-dasharray="4 3"/>
+<text x="820" y="606" font-size="11" text-anchor="middle" font-weight="normal" fill="#888" font-style="italic">unused</text>
+<rect x="660" y="800" width="160" height="90" rx="6" fill="#eee" stroke="#333" stroke-width="1.6"/>
+<text x="755" y="832" font-size="14" text-anchor="middle" font-weight="bold" fill="#222">Maglock 1</text>
+<text x="755" y="850" font-size="11" text-anchor="middle" font-weight="normal" fill="#555">12 V DC</text>
+<text x="755" y="866" font-size="11" text-anchor="middle" font-weight="normal" fill="#555">door 1</text>
+<polyline points="690,574 690,796" fill="none" stroke="#d62728" stroke-width="2.6" stroke-linejoin="round"/>
+<circle cx="690" cy="800" r="4" fill="#fff" stroke="#d62728" stroke-width="1.8"/>
+<text x="690" y="820" font-size="12" text-anchor="middle" font-weight="normal" fill="#222"></text>
+<text x="699" y="818" font-size="14" text-anchor="start" font-weight="bold" fill="#d62728">+</text>
+<circle cx="690" cy="890" r="4" fill="#fff" stroke="#222" stroke-width="1.8"/>
+<text x="690" y="910" font-size="12" text-anchor="middle" font-weight="normal" fill="#222"></text>
+<text x="699" y="884" font-size="14" text-anchor="start" font-weight="bold" fill="#222">−</text>
+<polyline points="690,894 690,930" fill="none" stroke="#222" stroke-width="2.6" stroke-linejoin="round"/>
+<polyline points="690,930 690,942" fill="none" stroke="#222" stroke-width="2" stroke-linejoin="round"/>
+<line x1="679" y1="942.0" x2="701" y2="942.0" stroke="#222" stroke-width="2"/>
+<line x1="683" y1="946.5" x2="697" y2="946.5" stroke="#222" stroke-width="2"/>
+<line x1="687" y1="951.0" x2="693" y2="951.0" stroke="#222" stroke-width="2"/>
+<polyline points="690,770 640,770" fill="none" stroke="#d62728" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="690" cy="770" r="4.5" fill="#d62728"/>
+<polyline points="640,770 640,832.5" fill="none" stroke="#222" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="640,852.5 640,915" fill="none" stroke="#222" stroke-width="2" stroke-linejoin="round"/>
+<polygon points="630,852.5 650,852.5 640,834.5" fill="#222"/>
+<line x1="630" y1="833.5" x2="650" y2="833.5" stroke="#222" stroke-width="3"/>
+<text x="626" y="846.5" font-size="11.5" text-anchor="end" font-weight="bold" fill="#222"></text>
+<polyline points="640,915 690,915" fill="none" stroke="#222" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="690" cy="915" r="4.5" fill="#222"/>
+<text x="626" y="847" font-size="11" text-anchor="end" font-weight="bold" fill="#222">1N4007</text>
+<polyline points="955,574 955,630" fill="none" stroke="#d62728" stroke-width="2.6" stroke-linejoin="round"/>
+<rect x="905" y="630" width="100" height="22" rx="3" fill="#fff" stroke="#d62728" stroke-width="1.8"/>
+<text x="955" y="646" font-size="12" text-anchor="middle" font-weight="bold" fill="#d62728">+12V LOCKS</text>
+<line x1="1020" y1="574" x2="1020" y2="592" stroke="#999" stroke-width="2" stroke-dasharray="4 3"/>
+<text x="1020" y="606" font-size="11" text-anchor="middle" font-weight="normal" fill="#888" font-style="italic">unused</text>
+<rect x="860" y="800" width="160" height="90" rx="6" fill="#eee" stroke="#333" stroke-width="1.6"/>
+<text x="955" y="832" font-size="14" text-anchor="middle" font-weight="bold" fill="#222">Maglock 2</text>
+<text x="955" y="850" font-size="11" text-anchor="middle" font-weight="normal" fill="#555">12 V DC</text>
+<text x="955" y="866" font-size="11" text-anchor="middle" font-weight="normal" fill="#555">door 2</text>
+<polyline points="890,574 890,796" fill="none" stroke="#d62728" stroke-width="2.6" stroke-linejoin="round"/>
+<circle cx="890" cy="800" r="4" fill="#fff" stroke="#d62728" stroke-width="1.8"/>
+<text x="890" y="820" font-size="12" text-anchor="middle" font-weight="normal" fill="#222"></text>
+<text x="899" y="818" font-size="14" text-anchor="start" font-weight="bold" fill="#d62728">+</text>
+<circle cx="890" cy="890" r="4" fill="#fff" stroke="#222" stroke-width="1.8"/>
+<text x="890" y="910" font-size="12" text-anchor="middle" font-weight="normal" fill="#222"></text>
+<text x="899" y="884" font-size="14" text-anchor="start" font-weight="bold" fill="#222">−</text>
+<polyline points="890,894 890,930" fill="none" stroke="#222" stroke-width="2.6" stroke-linejoin="round"/>
+<polyline points="890,930 890,942" fill="none" stroke="#222" stroke-width="2" stroke-linejoin="round"/>
+<line x1="879" y1="942.0" x2="901" y2="942.0" stroke="#222" stroke-width="2"/>
+<line x1="883" y1="946.5" x2="897" y2="946.5" stroke="#222" stroke-width="2"/>
+<line x1="887" y1="951.0" x2="893" y2="951.0" stroke="#222" stroke-width="2"/>
+<polyline points="890,770 1040,770" fill="none" stroke="#d62728" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="890" cy="770" r="4.5" fill="#d62728"/>
+<polyline points="1040,770 1040,832.5" fill="none" stroke="#222" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="1040,852.5 1040,915" fill="none" stroke="#222" stroke-width="2" stroke-linejoin="round"/>
+<polygon points="1030,852.5 1050,852.5 1040,834.5" fill="#222"/>
+<line x1="1030" y1="833.5" x2="1050" y2="833.5" stroke="#222" stroke-width="3"/>
+<text x="1026" y="846.5" font-size="11.5" text-anchor="end" font-weight="bold" fill="#222"></text>
+<polyline points="1040,915 890,915" fill="none" stroke="#222" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="890" cy="915" r="4.5" fill="#222"/>
+<text x="1054" y="847" font-size="11" text-anchor="start" font-weight="bold" fill="#222">1N4007</text>
+<text x="60" y="700" font-size="12" text-anchor="start" font-weight="normal" fill="#333">Diode at the lock, band to +.</text>
+<text x="60" y="719" font-size="12" text-anchor="start" font-weight="normal" fill="#333">Maglock on NO: the relay is ON while the door</text>
+<text x="60" y="738" font-size="12" text-anchor="start" font-weight="normal" fill="#333">is locked. Set each door's “When the relay is on,</text>
+<text x="60" y="757" font-size="12" text-anchor="start" font-weight="normal" fill="#333">the door is” to Locked (the 1.7 default).</text>
+<text x="60" y="776" font-size="12" text-anchor="start" font-weight="normal" fill="#333">A dead or restarting controller releases the door;</text>
+<text x="60" y="795" font-size="12" text-anchor="start" font-weight="normal" fill="#333">NC wiring holds instead (README-IRONFRAME.md, Locks).</text>
+<rect x="1170" y="700" width="760" height="300" rx="6" fill="#fff" stroke="#333" stroke-width="1.6"/>
+<text x="1186" y="726" font-size="14" text-anchor="start" font-weight="bold" fill="#222">Settings (Doors &amp; Readers page)</text>
+<text x="1186" y="752" font-size="12.5" text-anchor="start" font-weight="normal" fill="#222">Door 1: relay GPIO16, reader 1 D0 34 / D1 35, exit button GPIO13.</text>
+<text x="1186" y="773" font-size="12.5" text-anchor="start" font-weight="normal" fill="#222">Door 2: relay GPIO17, reader 2 D0 32 / D1 33.</text>
+<text x="1186" y="794" font-size="12.5" text-anchor="start" font-weight="normal" fill="#222">Relay type Active High; Unlock time 3000 ms (3000–5000, prove on the lock).</text>
+<text x="1186" y="815" font-size="12.5" text-anchor="start" font-weight="normal" fill="#222">A fresh esp32wroom board is pre-filled with exactly this: check it, then Save &amp; Reboot.</text>
+<text x="1186" y="836" font-size="12.5" text-anchor="start" font-weight="normal" fill="#222"></text>
+<text x="1186" y="857" font-size="12.5" text-anchor="start" font-weight="normal" fill="#222">Why the level shifter: the readers idle at 5 V; the ESP32 takes 3.6 V at most.</text>
+<text x="1186" y="878" font-size="12.5" text-anchor="start" font-weight="normal" fill="#222">Without it the pins sat at 3.8 V with 0.11 mA flowing into the chip (measured).</text>
+<text x="1186" y="899" font-size="12.5" text-anchor="start" font-weight="normal" fill="#222">GPIO34/35 have no pull-ups of their own: the shifter's 10 kΩ pull-ups hold them.</text>
+<text x="1186" y="920" font-size="12.5" text-anchor="start" font-weight="normal" fill="#222"></text>
+<text x="1186" y="941" font-size="12.5" text-anchor="start" font-weight="normal" fill="#222">Common ground: PSU 0 V, board, shifter and both readers.</text>
+<text x="1186" y="962" font-size="12.5" text-anchor="start" font-weight="normal" fill="#222">Wires that cross without a dot are not connected.</text>
+<text x="40" y="460" font-size="14" text-anchor="start" font-weight="bold" fill="#222">Wire colours</text>
+<polyline points="40,484 90,484" fill="none" stroke="#d62728" stroke-width="2.6" stroke-linejoin="round"/>
+<text x="102" y="488.5" font-size="12.5" text-anchor="start" font-weight="normal" fill="#222">+12 V</text>
+<polyline points="40,506 90,506" fill="none" stroke="#222" stroke-width="2.6" stroke-linejoin="round"/>
+<text x="102" y="510.5" font-size="12.5" text-anchor="start" font-weight="normal" fill="#222">0 V / GND</text>
+<polyline points="40,528 90,528" fill="none" stroke="#ff7f0e" stroke-width="2.6" stroke-linejoin="round"/>
+<text x="102" y="532.5" font-size="12.5" text-anchor="start" font-weight="normal" fill="#222">5 V (board → shifter HV)</text>
+<polyline points="40,550 90,550" fill="none" stroke="#8e44ad" stroke-width="2.6" stroke-linejoin="round"/>
+<text x="102" y="554.5" font-size="12.5" text-anchor="start" font-weight="normal" fill="#222">3.3 V (board → shifter LV)</text>
+<polyline points="40,572 90,572" fill="none" stroke="#1f9e3a" stroke-width="2.6" stroke-linejoin="round"/>
+<text x="102" y="576.5" font-size="12.5" text-anchor="start" font-weight="normal" fill="#222">Wiegand D0</text>
+<polyline points="40,594 90,594" fill="none" stroke="#333" stroke-width="5.0" stroke-linejoin="round"/>
+<polyline points="40,594 90,594" fill="none" stroke="#fff" stroke-width="2.6" stroke-linejoin="round"/>
+<text x="102" y="598.5" font-size="12.5" text-anchor="start" font-weight="normal" fill="#222">Wiegand D1</text>
+<polyline points="40,616 90,616" fill="none" stroke="#777" stroke-width="2.6" stroke-linejoin="round"/>
+<text x="102" y="620.5" font-size="12.5" text-anchor="start" font-weight="normal" fill="#222">Exit button</text>
+<rect x="40" y="1040" width="1920" height="110" fill="#fafafa" stroke="#333" stroke-width="1.6"/>
+<text x="56.0" y="1074" font-size="12" text-anchor="start" font-weight="normal" fill="#666">Drawing</text>
+<text x="56.0" y="1102" font-size="14" text-anchor="start" font-weight="bold" fill="#222">Two-door wiring, VOANZO board</text>
+<line x1="520.0" y1="1040" x2="520.0" y2="1150" stroke="#333" stroke-width="1.2"/>
+<text x="536.0" y="1074" font-size="12" text-anchor="start" font-weight="normal" fill="#666">Firmware</text>
+<text x="536.0" y="1102" font-size="14" text-anchor="start" font-weight="bold" fill="#222">Ironframe RFID 1.7.x, esp32wroom preset</text>
+<line x1="1000.0" y1="1040" x2="1000.0" y2="1150" stroke="#333" stroke-width="1.2"/>
+<text x="1016.0" y="1074" font-size="12" text-anchor="start" font-weight="normal" fill="#666">Source</text>
+<text x="1016.0" y="1102" font-size="14" text-anchor="start" font-weight="bold" fill="#222">docs/wiring/gen.py (regenerate, never hand-edit)</text>
+<line x1="1480.0" y1="1040" x2="1480.0" y2="1150" stroke="#333" stroke-width="1.2"/>
+<text x="1496.0" y="1074" font-size="12" text-anchor="start" font-weight="normal" fill="#666">Date</text>
+<text x="1496.0" y="1102" font-size="14" text-anchor="start" font-weight="bold" fill="#222">2026-10-17</text>
+<text x="56" y="1134" font-size="12" text-anchor="start" font-weight="normal" fill="#444">Full rules and reasons: README-IRONFRAME.md (Two doors, Wiring, Locks).</text>
+</svg>

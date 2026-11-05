@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Refuses a commit unless test/all.sh passed on exactly the tree being
+# committed. all.sh, when every gate passes, records its summary as
+# <git dir>/ifrfid-gates/<tree id>, the id of the working tree it tested
+# (test/tree-id.sh); the staged tree here is `git write-tree`. Run the gates
+# with exactly the changes you stage (nothing else edited or untracked), then
+# commit. Install: bash tools/install-hooks.sh.
+# Bypass (say so in the commit message): git commit --no-verify
+# The record must also hold a PASS line for every gate below (plan 1.9.1
+# E2): a hand-written last line alone is not a pass. Keep this list equal to
+# test/all.sh's gates (test/check-hook.sh compares them).
+REQUIRED_GATES="builds iram native qemu-esp32 qemu-esp32-configured qemu-esp32s3 assets port docs protocol live version hook hook-installed e2e"
+set -u
+tree=$(git write-tree) || { echo "pre-commit: cannot read the staged tree" >&2; exit 1; }
+rec="$(git rev-parse --git-common-dir)/ifrfid-gates/$tree"
+if [ -f "$rec" ] && tail -n 1 "$rec" | grep -Eq "^ALL GATES PASSED [0-9a-f]{40}( \+ uncommitted)? tree $tree\$"; then
+	missing=""
+	for g in $REQUIRED_GATES; do
+		grep -Eq "^PASS $g [0-9]+s\$" "$rec" || missing="$missing $g"
+	done
+	if [ -z "$missing" ]; then
+		echo "pre-commit: gates passed on this tree ($(tail -n 1 "$rec"))" >&2
+		exit 0
+	fi
+	echo "pre-commit: refused: the record for $tree has no PASS line for:$missing" >&2
+	exit 1
+fi
+cat >&2 <<MSG
+pre-commit: refused: no ALL GATES PASSED record for the staged tree $tree.
+  Run: bash test/all.sh --allow-dirty   with exactly the changes being committed
+  (nothing else edited, nothing untracked that is not ignored), then commit again.
+  Deliberate bypass only: git commit --no-verify (say why in the commit message).
+MSG
+exit 1

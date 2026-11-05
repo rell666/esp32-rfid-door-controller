@@ -1,0 +1,143 @@
+<template id="networkcontent">
+<div class="set-page set-network">
+    <div class="pagehead">
+        <h1>Wireless Network</h1>
+        <p>Join your Wi-Fi network, or let the reader run its own hotspot.</p>
+    </div>
+
+    <div id="apopenwarn" class="banner warning" hidden>
+        <svg class="icon"><use href="#i-alert"/></svg>
+        <div>With no password the hotspot is open: anyone nearby can join it and reach the sign-in page. Set a password of 8 to 63 characters.</div>
+    </div>
+
+    <!-- ---- mode and network ---- -->
+    <section class="card">
+        <h2>Network</h2>
+        <div class="field">
+            <div class="label" id="wmode-l">Wi-Fi mode<button type="button" class="help" aria-describedby="wmode-l" data-content="Client: the reader joins an existing Wi-Fi network (the usual choice). Hotspot: the reader makes its own Wi-Fi network, which you join with your phone or laptop to reach this page." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+            <div class="segmented" role="radiogroup" aria-labelledby="wmode-l">
+                <label><input type="radio" value="0" name="wmode" id="wmodesta" data-onchange="handleSTA">Client</label>
+                <label><input type="radio" value="1" name="wmode" id="wmodeap" data-onchange="handleAP" checked>Hotspot</label>
+            </div>
+            <div class="hint" id="wmodehint"></div>
+        </div>
+
+        <div class="field">
+            <div class="labelrow"><label for="inputtohide" id="lbl-inputtohide"><span id="ssidlabel">Network name (SSID)</span></label><button type="button" class="help" aria-describedby="lbl-inputtohide" data-content="The name of the Wi-Fi network: in Client mode the one the reader joins (type it, or Scan and pick it), in Hotspot mode the name the reader broadcasts. Up to 32 characters." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+            <div class="set-inline">
+                <input id="inputtohide" type="text" name="ap_ssid" maxlength="32" autocomplete="off" autocapitalize="off" spellcheck="false" data-oninput="ssidTyped">
+                <button id="scanb" type="button" class="btn" data-onclick="scanWifi" hidden><svg class="icon icon-sm"><use href="#i-search"/></svg><span id="scanbtext">Scan</span></button>
+            </div>
+            <div id="scanbox" class="set-scanbox" hidden>
+                <div id="scanstate" class="set-scanstate muted small" role="status"></div>
+                <ul id="ssid" class="list set-scanlist" aria-label="Networks found"></ul>
+            </div>
+        </div>
+
+        <div id="hideBSSID" hidden>
+            <div class="field">
+                <div class="labelrow"><label class="check" for="bssidlock" id="lbl-bssidlock"><input type="checkbox" id="bssidlock" data-onchange="bssidLockChanged"><span>Lock to this access point</span></label><button type="button" class="help" aria-describedby="lbl-bssidlock" data-content="Off (the usual choice): the reader joins any access point of this network. On: it joins only the one with this BSSID (its radio address), for example when two networks share a name. If that access point is then switched off or replaced, the reader does not connect." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+            </div>
+            <div class="field" id="bssidrow" hidden>
+                <label for="wifibssid">BSSID</label>
+                <input id="wifibssid" type="text" name="ap_bssid" class="mono" placeholder="aa:bb:cc:dd:ee:ff" maxlength="17" autocomplete="off" autocapitalize="off" spellcheck="false">
+                <div class="hint">Filled in from the network picked in the scan results; or type it.</div>
+            </div>
+        </div>
+
+        <div class="field">
+            <div class="labelrow"><label for="wifipass" id="lbl-wifipass"><span id="passlabel">Password</span></label><button type="button" class="help" aria-describedby="lbl-wifipass" data-content="The Wi-Fi password. In Hotspot mode: 8 to 63 characters, or empty for an open hotspot (not recommended)." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+            <div class="set-inline">
+                <input id="wifipass" name="ap_passwd" type="password" maxlength="64" autocomplete="new-password" autocapitalize="off" spellcheck="false" data-oninput="maskHints">
+                <button type="button" class="btn set-reveal" data-onclick="spReveal" data-arg="wifipass" aria-controls="wifipass" aria-pressed="false">Show</button>
+            </div>
+            <div class="hint" id="wifipass-kept" hidden>The saved password is kept. Type a new one to change it.</div>
+        </div>
+
+        <div class="field" id="hideap">
+            <div class="label" id="hideap-l">Hide network name<button type="button" class="help" aria-describedby="hideap-l" data-content="Yes: the hotspot does not broadcast its name, so it is not listed on phones; you type the name to join. It is not a security measure: the name can still be found with the right tools." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+            <div class="segmented" role="radiogroup" aria-labelledby="hideap-l">
+                <label><input type="radio" value="1" name="hideapenable">Yes</label>
+                <label><input type="radio" value="0" name="hideapenable" checked>No</label>
+            </div>
+        </div>
+    </section>
+
+    <!-- ---- addresses ---- -->
+    <section class="card">
+        <h2>IP address</h2>
+        <div class="field" id="dhcp">
+            <div class="label" id="dhcp-l">Use DHCP<button type="button" class="help" aria-describedby="dhcp-l" data-content="Yes (the usual choice): the router gives the reader its IP address. No: you set a fixed address, mask, gateway and DNS server below." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+            <div class="segmented" role="radiogroup" aria-labelledby="dhcp-l">
+                <label><input type="radio" value="1" name="dhcpenabled" data-onchange="handleDHCP" checked>Yes</label>
+                <label><input type="radio" value="0" name="dhcpenabled" data-onchange="handleDHCP">No</label>
+            </div>
+        </div>
+        <p id="dhcpnote" class="muted small" hidden>The router assigns the address. The address in use is shown on the Status page.</p>
+        <div id="staticip1" class="grid2" hidden>
+            <div class="field">
+                <div class="labelrow"><label for="ipaddress" id="lbl-ipaddress">IP address</label><button type="button" class="help" aria-describedby="lbl-ipaddress" data-content="Four numbers from 0 to 255, for example 192.168.4.1. In Hotspot mode this is the address of this page on the hotspot." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                <input id="ipaddress" type="text" inputmode="decimal" class="mono" placeholder="192.168.4.1" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="field">
+                <div class="labelrow"><label for="subnet" id="lbl-subnet">Subnet mask</label><button type="button" class="help" aria-describedby="lbl-subnet" data-content="Usually 255.255.255.0." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                <input id="subnet" type="text" inputmode="decimal" class="mono" placeholder="255.255.255.0" autocomplete="off" spellcheck="false">
+            </div>
+        </div>
+        <div id="staticip2" class="grid2" hidden>
+            <div class="field">
+                <label for="gateway">Gateway</label>
+                <input id="gateway" type="text" inputmode="decimal" class="mono" placeholder="192.168.1.1" autocomplete="off" spellcheck="false">
+                <div class="hint">Usually your router's address.</div>
+            </div>
+            <div class="field">
+                <label for="dnsadd">DNS server</label>
+                <input id="dnsadd" type="text" inputmode="decimal" class="mono" placeholder="192.168.1.1" autocomplete="off" spellcheck="false">
+                <div class="hint">Needed to find the NTP and MQTT servers by name.</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ---- fallback hotspot ---- -->
+    <section class="card">
+        <h2>Fallback hotspot</h2>
+        <div class="field">
+            <div class="label" id="fallback-l">Wi-Fi fallback mode<button type="button" class="help" aria-describedby="fallback-l" data-content="Opens a hotspot (IRONFRAME-RFID-xxxxxx) when the reader cannot reach your Wi-Fi network for 5 minutes, so you can still reach this page. It needs its own password." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+            <div class="segmented" role="radiogroup" aria-labelledby="fallback-l">
+                <label><input type="radio" value="1" name="fallbackmode" data-onchange="showFallback">Enabled</label>
+                <label><input type="radio" value="0" name="fallbackmode" data-onchange="showFallback" checked>Disabled</label>
+            </div>
+        </div>
+        <div class="field" id="fallbackpassrow">
+            <div class="labelrow"><label for="fallbackpass" id="lbl-fallbackpass">Fallback hotspot password</label><button type="button" class="help" aria-describedby="lbl-fallbackpass" data-content="8 to 63 characters. Required for fallback mode: the fallback hotspot never opens without a password." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+            <div class="set-inline">
+                <input id="fallbackpass" type="password" minlength="8" maxlength="63" autocomplete="new-password" autocapitalize="off" spellcheck="false" data-oninput="maskHints">
+                <button type="button" class="btn set-reveal" data-onclick="spReveal" data-arg="fallbackpass" aria-controls="fallbackpass" aria-pressed="false">Show</button>
+            </div>
+            <div class="hint" id="fallbackpass-kept" hidden>The saved password is kept. Type a new one to change it.</div>
+            <div class="hint" id="fallbackpass-count"></div>
+        </div>
+    </section>
+
+    <!-- ---- power ---- -->
+    <section class="card">
+        <h2>Power saving</h2>
+        <div class="field">
+            <div class="labelrow"><label class="check" for="idleoff" id="lbl-idleoff"><input type="checkbox" id="idleoff" data-onchange="showIdleOff"><span>Turn Wi-Fi off when nobody is connected</span></label><button type="button" class="help" aria-describedby="lbl-idleoff" data-content="Off (the default): Wi-Fi stays on. On: Wi-Fi turns off once nobody has been connected for the time below, that is no phone or laptop joined to the reader's hotspot and no page like this one open. It applies in every mode: on your network, as a hotspot and as the fallback hotspot." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+        </div>
+        <div class="field" id="idleminsrow">
+            <div class="labelrow"><label for="idlemins" id="lbl-idlemins">Turn Wi-Fi off after</label><button type="button" class="help" aria-describedby="lbl-idlemins" data-content="Minutes with nobody connected, 1 to 1440 (a day). The count starts again whenever someone connects." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+            <div class="hw-unit">
+                <input id="idlemins" type="number" min="1" max="1440" value="15" inputmode="numeric">
+                <span>min</span>
+            </div>
+            <div class="hint" id="idleoffnote">While Wi-Fi is off, MQTT (Home Assistant) and NTP time stop and this page cannot be reached; the doors, readers and logs keep working. To turn Wi-Fi back on, scan an admin card or switch the reader off and on.</div>
+        </div>
+    </section>
+
+    <div class="actions set-save">
+        <p class="muted small">Save shows what changes for you to confirm; nothing is stored on the reader until you do.</p>
+        <button type="button" data-onclick="savePage" data-arg="network" class="btn primary">Save</button>
+    </div>
+</div>
+</template>

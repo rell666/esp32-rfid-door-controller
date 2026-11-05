@@ -1,0 +1,352 @@
+void setEnableWifi()
+{
+	doEnableWifi = true;
+}
+
+// WiFi event callbacks run in the ESP32 event task, not loop(): they only set
+// flags and toggle LEDs; MQTT is (dis)connected from loop() via mqttLoop().
+void onWifiConnect(WiFiEvent_t event, WiFiEventInfo_t info)
+{
+#ifdef DEBUG
+	Serial.println(F("[ INFO ] WiFi STA Connected"));
+#endif
+	ledWifiOff();
+}
+
+void onWifiDisconnect(WiFiEvent_t event, WiFiEventInfo_t info)
+{
+#ifdef DEBUG
+	Serial.printf("[ INFO ] WiFi STA Disconnected, reason %u\n", info.wifi_sta_disconnected.reason);
+#endif
+	mqttDisconnectRequested = true;
+	ledWifiOff();
+}
+
+void onWifiGotIP(WiFiEvent_t event, WiFiEventInfo_t info)
+{
+#ifdef DEBUG
+	Serial.print("[ INFO ] WiFi IP Connected: ");
+	Serial.println(WiFi.localIP().toString());
+#endif
+	wifiReconnectTimer.detach();
+	ledWifiOn();
+	mdnsStartRequested.store(true);
+	mqttConnectRequested = true;
+}
+
+static void startMdns()
+{
+	MDNS.end();
+	if (MDNS.begin(config.deviceHostname))
+	{
+		MDNS.addService("http", "tcp", 80);
+	}
+}
+
+bool startAP(IPAddress apip, IPAddress apsubnet, bool hidden, const char *ssid, const char *password = NULL)
+{
+#ifdef DEBUG
+	Serial.println(F("[ INFO ] Ironframe RFID is running in AP Mode "));
+#endif
+	WiFi.mode(WIFI_AP);
+	WiFi.softAPConfig(apip, apip, apsubnet);
+
+	bool success;
+	if (password != NULL && password[0] != '\0' && strlen(password) < 8)
+	{
+		// WPA2 needs >= 8 characters; the ESP32 refuses shorter ones. New saves
+		// are rejected (applyConfigPolicy); an old config gets a loud warning.
+		writeEvent("WARN", "wifi", "AP password shorter than 8 characters: access point is OPEN", "");
+		password = NULL;
+	}
+	success = WiFi.softAP(ssid, password, 3, hidden ? 1 : 0);
+	apOpen = success && (password == NULL || password[0] == '\0');
+#ifdef DEBUG
+	Serial.println(success ? F("Ready") : F("Failed!"));
+#endif
+
+	if (success)
+	{
+		ledWifiOn();
+		startMdns();
+	}
+
+#ifdef DEBUG
+	Serial.print(F("[ INFO ] AP IP address: "));
+	Serial.println(WiFi.softAPIP());
+	Serial.printf("[ INFO ] AP SSID: %s\n", ssid);
+#endif
+	return success;
+}
+
+// After a failed connect the fallback AP runs alongside STA and the configured
+// network is retried; when it connects the AP closes. Upstream switched to
+// AP-only for good, so a router that took longer than 15 s to come back after
+// a power cut left the reader off the LAN until someone power-cycled it.
+static bool fallbackRetrySta = false;
+static uint64_t fallbackNextRetry = 0;
+static const unsigned long FALLBACK_STA_RETRY_MS = 120000;
+
+static void beginSTA(const char *ssid, const char *password, byte bssid[6])
+{
+	bool useBSSID = false;
+	for (int i = 0; i < 6; i++)
+	{
+		if (bssid[i] != 0)
+			useBSSID = true;
+	}
+	if (useBSSID)
+		WiFi.begin(ssid, password, 0, bssid);
+	else
+		WiFi.begin(ssid, password);
+}
+
+// The fallback hotspot may open: fallback mode on, with its own password.
+// Until review 6 it opened with no password, so anyone who jammed the
+// router for 5 minutes had an open network to the admin page.
+static bool fallbackAllowed()
+{
+	return config.fallbackMode && core::isValidFallbackPassword(config.fallbackPassword);
+}
+
+// Fallback to AP Mode, so we can connect to the device if there is no WiFi.
+// retrySta: a network is configured and keeps being tried in the background;
+// the hotspot then has the fallback password. Without (an unconfigured
+// device) it is the setup hotspot, the only way to commission a new board,
+// with the documented setup password (core::SETUP_HOTSPOT_PASSWORD; open
+// until 1.8).
+void fallbacktoAPMode(bool retrySta)
+{
+	fallbackApUp = true;
+#ifdef DEBUG
+	Serial.println(F("[ INFO ] Ironframe RFID is running in Fallback AP Mode"));
+#endif
+	fallbackRetrySta = retrySta && config.ssid[0] != '\0';
+	if (fallbackRetrySta)
+	{
+		WiFi.setAutoReconnect(false); // retried on our schedule (wifiFallbackLoop)
+		WiFi.disconnect(false);
+		WiFi.mode(WIFI_AP_STA);
+		fallbackNextRetry = uptimeMs() + FALLBACK_STA_RETRY_MS;
+	}
+	else
+	{
+		WiFi.mode(WIFI_AP);
+	}
+	uint8_t macAddr[6];
+	WiFi.softAPmacAddress(macAddr);
+	char ssid[32];
+	snprintf(ssid, sizeof(ssid), "IRONFRAME-RFID-%02x%02x%02x", macAddr[3], macAddr[4], macAddr[5]);
+	const char *pass = retrySta ? config.fallbackPassword : core::SETUP_HOTSPOT_PASSWORD;
+	bool up = WiFi.softAP(ssid, pass);
+	apOpen = false; // both have a WPA2 password (fallbackAllowed() checked the fallback one)
+	if (up)
+	{
+		ledWifiOn();
+		startMdns();
+#ifdef DEBUG
+		Serial.print(F("[ INFO ] AP IP address: "));
+		Serial.println(WiFi.softAPIP());
+		Serial.printf("[ INFO ] AP SSID: %s\n", ssid);
+#endif
+	}
+}
+
+// Called from loop(). While the fallback AP is up, retry the configured
+// network every two minutes - but not while someone is connected to the AP
+// (a STA scan moves the radio off the AP channel under them). Once it
+// connects, close the AP and carry on as a normal STA.
+void wifiFallbackLoop()
+{
+	if (!fallbackRetrySta)
+		return;
+	if (WiFi.isConnected())
+	{
+		fallbackRetrySta = false;
+		fallbackApUp = false;
+		WiFi.softAPdisconnect(true);
+		apOpen = false;
+		WiFi.mode(WIFI_STA);
+		WiFi.setAutoReconnect(true);
+		writeEvent("INFO", "wifi", "WiFi is connected, fallback access point closed", String(config.ssid) + " " + WiFi.localIP().toString());
+		startMdns();
+		return;
+	}
+	if (uptimeMs() < fallbackNextRetry)
+		return; // (checked first: no station count asked for between turns)
+	if (!core::fallbackRetryDue(uptimeMs(), fallbackNextRetry, WiFi.softAPgetStationNum() > 0, FALLBACK_STA_RETRY_MS))
+		return;
+#ifdef DEBUG
+	Serial.println(F("[ INFO ] Fallback AP: retrying the configured network"));
+#endif
+	beginSTA(config.ssid, config.wifiPassword, config.bssid);
+}
+
+// A station connect in progress: begun by connectSTA(), finished (connected
+// or timed out) by staConnectLoop(). Upstream waited here for up to 15 s
+// inside loop(), so the doors, readers and web UI stood still meanwhile.
+static bool staConnecting = false;
+static uint64_t staConnectDeadline = 0;
+static const unsigned long STA_CONNECT_TIMEOUT_MS = 15000;
+
+// Start connecting to Wi-Fi
+void connectSTA(const char *ssid, const char *password, byte bssid[6])
+{
+	bool useBSSID = false;
+	WiFi.persistent(false);
+	WiFi.mode(WIFI_STA);
+	WiFi.setAutoReconnect(true);
+
+	if (!config.dhcpEnabled)
+	{
+		WiFi.config(toIp(config.ipAddress), toIp(config.gatewayIp), toIp(config.subnetIp), toIp(config.dnsIp));
+	}
+#ifdef DEBUG
+	Serial.print(F("[ INFO ] Trying to connect WiFi: "));
+	Serial.println(ssid);
+#endif
+	for (int i = 0; i < 6; i++)
+	{
+		if (bssid[i] != 0)
+			useBSSID = true;
+	}
+	if (useBSSID)
+	{
+#ifdef DEBUG
+		Serial.println(F("[ INFO ] BSSID locked"));
+#endif
+		WiFi.begin(ssid, password, 0, bssid);
+	}
+	else
+	{
+		WiFi.begin(ssid, password);
+	}
+	staConnecting = true;
+	staConnectDeadline = uptimeMs() + STA_CONNECT_TIMEOUT_MS;
+}
+
+// Called from loop()
+void staConnectLoop()
+{
+	if (!staConnecting)
+		return;
+	if (WiFi.isConnected())
+	{
+		staConnecting = false;
+		String data = config.ssid;
+		data += " " + WiFi.localIP().toString();
+		writeEvent("INFO", "wifi", "WiFi is connected", data);
+		startMdns();
+		return;
+	}
+	if (uptimeMs() < staConnectDeadline)
+		return;
+	staConnecting = false;
+#ifdef DEBUG
+	Serial.println(F("[ WARN ] Couldn't connect in time"));
+#endif
+	if (fallbackAllowed())
+	{
+		fallbacktoAPMode(true);
+	}
+	else
+	{
+		// the ESP32 driver keeps retrying on its own (setAutoReconnect);
+		// this re-runs the full connect after 5 minutes as a backstop
+		wifiReconnectTimer.once(300, setEnableWifi);
+	}
+}
+
+// With fallback on, a station link lost for STA_LOST_FALLBACK_MS after it
+// had connected also opens the fallback AP (it only followed the first
+// connect timeout, so a router that went away for good later left the board
+// unreachable until it was restarted). Called from loop().
+static const uint32_t STA_LOST_FALLBACK_MS = 5UL * 60UL * 1000UL;
+
+void staLinkLoop()
+{
+	static core::LinkLostWatch watch;
+	bool watching = fallbackAllowed() && !config.accessPointMode && !fallbackApUp && !staConnecting && WiFi.getMode() == WIFI_STA;
+	if (!watch.tick(uptimeMs(), watching, WiFi.isConnected(), STA_LOST_FALLBACK_MS))
+		return;
+	writeEvent("WARN", "wifi", "WiFi lost for 5 minutes, fallback access point opened", config.ssid);
+	fallbacktoAPMode(true);
+}
+
+// Anyone using the board over Wi-Fi: a device joined to its hotspot, or a
+// signed-in page open (the WebSocket takes signed-in pages only). Idle-off
+// (core/wifiidle.h) never turns Wi-Fi off under them.
+bool wifiAnyoneConnected()
+{
+	if ((WiFi.getMode() & WIFI_MODE_AP) && WiFi.softAPgetStationNum() > 0)
+		return true;
+	return ws.count() > 0;
+}
+
+void disableWifi()
+{
+	wifiReconnectTimer.detach(); // a pending 5-minute connect backstop must not turn it back on
+	staConnecting = false;
+	WiFi.disconnect(true);
+	WiFi.softAPdisconnect(true);
+	apOpen = false;
+	fallbackApUp = false;
+	fallbackRetrySta = false;
+	WiFi.mode(WIFI_OFF);
+#ifdef DEBUG
+	Serial.println(F("Turn wifi off."));
+#endif
+}
+
+void enableWifi()
+{
+	if (fallbackApUp)
+		return; // already reachable; wifiFallbackLoop() keeps retrying the network
+	if (setupHotspot)
+	{
+		// no settings: an admin card (users kept by a BOOT-hold recovery)
+		// opens the setup hotspot again, not a connect to no network
+		fallbacktoAPMode(false);
+		return;
+	}
+	if (config.accessPointMode)
+	{
+		startAP(toIp(config.accessPointIp), toIp(config.accessPointSubnetIp), config.networkHidden, config.ssid, config.wifiPassword);
+	}
+	else
+	{
+		connectSTA(config.ssid, config.wifiPassword, config.bssid); // staConnectLoop() falls back if it fails
+	}
+}
+
+void setupWifi(bool configured)
+{
+	// ESP32: the hostname must be set before the interface is started
+	if (!configured)
+	{
+		WiFi.setHostname("ironframe-rfid");
+		if (configDamaged)
+		{
+			// commissioned but damaged: physical recovery only (hold BOOT).
+			// With the radio off nothing has started the TCP/IP stack, and
+			// setupWebServer() then asserts in lwIP ("Invalid mbox") on every
+			// start, so loop() and the BOOT recovery never ran (bench
+			// 2026-10-18, ledger H27). Start the stack without the radio.
+			esp_netif_init();
+			WiFi.mode(WIFI_OFF);
+			return;
+		}
+		setupHotspot = true;
+		fallbacktoAPMode(false);
+	}
+	else
+	{
+		WiFi.onEvent(onWifiConnect, ARDUINO_EVENT_WIFI_STA_CONNECTED);
+		WiFi.onEvent(onWifiDisconnect, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+		WiFi.onEvent(onWifiGotIP, ARDUINO_EVENT_WIFI_STA_GOT_IP);
+		WiFi.setHostname(config.deviceHostname);
+		if (config.fallbackMode && !fallbackAllowed())
+			writeEvent("WARN", "wifi", "WiFi fallback mode is on but has no fallback hotspot password: no fallback hotspot (set one on the Network page)", "");
+		enableWifi();
+	}
+}

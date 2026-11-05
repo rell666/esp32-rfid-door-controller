@@ -1,0 +1,130 @@
+/* Access Log, Event Log, Log Settings, Backup & Restore (page-logs.css: after app.css) */
+
+.icon.flip { transform: rotate(180deg); }
+
+/* ---- the log pages --------------------------------------------------------- */
+/* a log table needs the room on a desktop: these two pages are wider */
+@media (min-width: 900px) {
+  #content:has(.logpage) { max-width: 1120px; }
+}
+.logtools { padding: var(--gap) var(--gap) 10px; border-bottom: 1px solid var(--if-800); }
+.logtools .toolbar { margin-bottom: 10px; }
+.logfilter { display: flex; width: 100%; }
+.logfilter label { flex: 1 1 0; justify-content: center; gap: 6px; padding: 0 10px; white-space: nowrap; }
+.logfilter .count { font-size: 12px; font-weight: 600; opacity: 0.75; }
+.logfilter .count:empty { display: none; }
+.logsummary { margin-top: 8px; min-height: 20px; }
+.logsummary:empty { display: none; }
+.logcard { scroll-margin-top: calc(var(--bar-h) + 8px); }
+.logcard .loading { padding: 32px var(--gap); }
+.logcard .empty p { margin-bottom: 12px; }
+.logcard .pager { border-top: 1px solid var(--if-800); flex-wrap: wrap; }
+.logactions { align-items: center; margin-top: 0; }
+.logactions > .small { flex: 1 1 200px; }
+.logactions > .small:empty { display: none; }
+
+/* column headings sort the table */
+table.logtable th { padding-top: 6px; padding-bottom: 6px; }
+table.logtable .sortbtn { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; margin: 0 -6px; padding: 0 6px; border: 0; border-radius: 6px; background: none; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; cursor: pointer; white-space: nowrap; }
+table.logtable .sortbtn:hover { color: #fff; background: var(--if-800); }
+table.logtable th[aria-sort=ascending], table.logtable th[aria-sort=descending] { color: var(--if-amber); }
+table.logtable th[aria-sort=ascending] .sortbtn::after { content: "\2191"; }
+table.logtable th[aria-sort=descending] .sortbtn::after { content: "\2193"; }
+table.logtable th:first-child, table.logtable td:first-child { padding-left: var(--gap); }
+table.logtable th:last-child, table.logtable td:last-child { padding-right: var(--gap); }
+table.logtable tbody tr:nth-child(even) td { background: rgba(10, 25, 41, 0.35); }
+table.logtable tbody tr:hover td { background: rgba(36, 59, 83, 0.5); }
+table.logtable tr.lv-bad td:first-child { box-shadow: inset 3px 0 0 var(--if-danger); }
+table.logtable tr.lv-warn td:first-child { box-shadow: inset 3px 0 0 var(--if-warning); }
+table.logtable td.c-time { white-space: nowrap; color: var(--if-200); }
+table.logtable td.c-id { color: var(--if-400); white-space: nowrap; }
+table.logtable th.c-id { width: 1%; }
+table.logtable td.c-type, table.logtable td.c-access, table.logtable td.c-src, table.logtable td.c-dir { white-space: nowrap; }
+table.logtable td.c-name, table.logtable td.c-desc { color: #fff; }
+table.logtable td.c-data { font-size: 13px; color: var(--if-200); min-width: 160px; }
+table.logtable td.c-uid { white-space: nowrap; }
+
+/* Phones: each entry is a block of two or three short lines (what, when,
+   the details) instead of a table to pan sideways: in a 7-column table
+   the Access / Event Type column, the one that matters, was off screen. */
+@media (max-width: 599px) {
+  .logtools .toolbar .search { flex-basis: 100%; }
+  .logtools .toolbar #latestorder, .logtools .toolbar #eventorder { flex: 1; }
+  .logfilter label { padding: 0 6px; font-size: 14px; }
+  table.logtable, table.logtable tbody { display: block; }
+  table.logtable thead { display: none; }
+  table.logtable tr { display: flex; flex-wrap: wrap; align-items: baseline; row-gap: 3px; padding: 12px var(--gap); border-top: 1px solid rgba(51, 78, 104, 0.6); }
+  table.logtable tbody tr:first-child { border-top: 0; }
+  table.logtable tbody tr:nth-child(even) { background: rgba(10, 25, 41, 0.35); }
+  table.logtable tbody tr:nth-child(even) td, table.logtable tbody tr:hover td { background: none; }
+  table.logtable tr::after { content: ""; order: 2; flex-basis: 100%; height: 0; }
+  table.logtable.accesslog tr::before { content: ""; order: 6; flex-basis: 100%; height: 0; }
+  table.logtable td, table.logtable td:first-child, table.logtable td:last-child { display: block; padding: 0; border: 0; font-size: 13px; color: var(--if-400); white-space: normal; min-width: 0; }
+  table.logtable td:empty { display: none; }
+  table.logtable tr.lv-bad { box-shadow: inset 3px 0 0 var(--if-danger); }
+  table.logtable tr.lv-warn { box-shadow: inset 3px 0 0 var(--if-warning); }
+  table.logtable tr.lv-bad td:first-child, table.logtable tr.lv-warn td:first-child { box-shadow: none; }
+  /* line 1: who / what, and the badge */
+  table.logtable td.c-name, table.logtable td.c-desc { order: 0; flex: 1 1 0; font-size: 15px; font-weight: 600; color: #fff; overflow-wrap: anywhere; }
+  table.logtable td.c-access, table.logtable td.c-type { order: 1; margin-left: 12px; }
+  /* line 2: when, and the details, separated by dots */
+  table.logtable td.c-time { order: 3; white-space: nowrap; color: var(--if-200); }
+  table.logtable td.c-door, table.logtable td.c-src { order: 4; }
+  table.logtable td.c-dir, table.logtable td.c-id { order: 5; }
+  table.logtable td.c-uid { order: 7; }
+  table.logtable td.c-role { order: 8; }
+  table.logtable td.c-door::before, table.logtable td.c-dir::before, table.logtable td.c-src::before, table.logtable td.c-role::before { content: "\00b7"; margin: 0 6px; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
+  table.logtable td.c-id::before { content: "\00b7\00a0\00a0#"; margin-left: 4px; }
+  table.logtable td.c-uid::before { content: "UID "; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
+  table.logtable td.c-role::before { content: "\00b7\00a0\00a0" attr(data-label) ": "; margin: 0 0 0 6px; }
+  table.logtable td.c-uid:empty ~ td.c-role::before { content: attr(data-label) ": "; margin: 0; }
+  /* line 3 (events): the additional data */
+  table.logtable td.c-data { order: 8; flex-basis: 100%; margin-top: 3px; color: var(--if-200); overflow-wrap: anywhere; font-size: 12px; }
+  .logactions .btn { flex: 1; }
+}
+
+/* ---- Log Settings ---------------------------------------------------------- */
+/* a switch as the field's label (app.css .field > label made it a block) */
+.field > label.switch { display: flex; margin-bottom: 0; }
+.logsettings .card > .field:last-child { margin-bottom: 0; }
+/* help buttons: 36 px touch target, without making the line taller */
+.logsettings .help { width: 36px; height: 36px; margin: -8px -4px -8px 0; }
+.savednote { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 14px; color: #9ae6b4; }
+.filehead { padding: var(--gap) var(--gap) 8px; }
+.card .filehead h2 { flex: 1; }
+.card .filehead .small { white-space: nowrap; }
+.filelist { border-top: 1px solid var(--if-800); }
+.filelist > li { flex-wrap: wrap; row-gap: 10px; }
+.filelist .filekind { color: var(--if-400); }
+.filelist .sub .mono { color: var(--if-200); }
+.list .fileactions { flex-wrap: wrap; gap: 8px; }
+.logstorage { padding: 12px var(--gap) var(--gap); border-top: 1px solid var(--if-800); }
+@media (max-width: 719px) {
+  /* the file's actions on their own line under its name */
+  .list .fileactions { flex: 1 1 100%; display: grid; grid-template-columns: 1fr 1fr; padding-left: 34px; }
+}
+
+/* ---- Backup & Restore ------------------------------------------------------ */
+.bklist { margin: 0 calc(-1 * var(--gap)); }
+.bklist > li { flex-wrap: wrap; row-gap: 10px; }
+.bklist .bkicon { color: var(--if-amber); }
+.bklist .end .btn { min-width: 215px; }
+.bkloading { justify-content: flex-start; padding: 12px 0 0; }
+.restartrow p { margin: 0 0 12px; }
+@media (min-width: 600px) {
+  .restartrow { display: flex; align-items: center; gap: 16px; }
+  .restartrow p { flex: 1; margin: 0; }
+}
+@media (max-width: 599px) {
+  .bklist .end { flex-basis: 100%; padding-left: 34px; }
+  .bklist .end .btn { flex: 1; min-width: 0; }
+  .restartrow .btn { width: 100%; }
+}
+
+/* the user restore's progress */
+.progress .bar.warning { background-color: var(--if-warning); }
+.progress .bar.danger { background-color: var(--if-danger); }
+.restoreskipped { margin: 12px 0 4px; }
+.restoreskipped .skippedbody { min-width: 0; }
+.restoreskipped p { margin: 0 0 6px; }
+.restoreskipped ul { margin: 0; padding-left: 18px; max-height: 40vh; overflow-y: auto; font-size: 14px; overflow-wrap: anywhere; }

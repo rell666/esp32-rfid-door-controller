@@ -1,0 +1,424 @@
+static uint32_t hwRandom()
+{
+	return esp_random();
+}
+
+// Changes with every firmware build, so browsers revalidate cached assets
+// cheaply (304) instead of downloading ~300 KB of UI on every page load, and
+// never keep a stale UI after a firmware update.
+// the version and a hash of the compiled assets (scripts/version.py): it
+// changes when they do, and leaves two builds of one commit identical (it
+// held the build date and time; review 8 R5-5)
+static const char ASSET_ETAG[] = "\"" VERSION "-" ASSET_HASH "\"";
+
+// For the HTML pages: scripts, styles, fonts, images and connections
+// (XHR, the WebSocket) from this device only, and no inline script, so an
+// injected <script> or onerror= does not run (the UI binds its handlers
+// from data-on* attributes, main.js). Inline styles stay allowed: the
+// pages use style= throughout. connect-src comes last: cspFor() adds
+// ws://<host>, as not every browser lets 'self' cover the WebSocket.
+// test/e2e serves the same string, read from here.
+static const char CONTENT_SECURITY_POLICY[] = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; connect-src 'self'";
+
+static String cspFor(AsyncWebServerRequest *request)
+{
+	String policy(CONTENT_SECURITY_POLICY);
+	String host = request->host();
+	// the Host header goes into a header: host names, IPv4/IPv6 and a port only
+	bool clean = host.length() > 0 && host.length() <= 64;
+	for (size_t i = 0; clean && i < host.length(); i++)
+		clean = isalnum((unsigned char)host[i]) || strchr(".-:[]", host[i]) != nullptr;
+	if (clean)
+		policy += " ws://" + host;
+	return policy;
+}
+
+static void serveGz(AsyncWebServerRequest *request, const char *mime, const uint8_t *data, size_t len)
+{
+	servedRequest = true; // the UI is reachable: part of confirming a new image
+	if (request->hasHeader("If-None-Match") && request->header("If-None-Match") == ASSET_ETAG)
+	{
+		AsyncWebServerResponse *response = request->beginResponse(304);
+		response->addHeader("ETag", ASSET_ETAG);
+		response->addHeader("Cache-Control", "no-cache");
+		request->send(response);
+		return;
+	}
+	AsyncWebServerResponse *response = request->beginResponse(200, mime, data, len);
+	response->addHeader("Content-Encoding", "gzip");
+	response->addHeader("ETag", ASSET_ETAG);
+	response->addHeader("Cache-Control", "no-cache");
+	response->addHeader("X-Content-Type-Options", "nosniff");
+	if (strcmp(mime, "text/html") == 0)
+	{
+		response->addHeader("X-Frame-Options", "DENY");
+		response->addHeader("Referrer-Policy", "no-referrer");
+		response->addHeader("Content-Security-Policy", cspFor(request));
+	}
+	request->send(response);
+}
+
+static uint32_t remoteIpOf(AsyncWebServerRequest *request)
+{
+	return (uint32_t)request->client()->remoteIP();
+}
+
+
+// True if the request carries a live session token (query ?token= or
+// X-Session-Token header).
+static bool hasValidSession(AsyncWebServerRequest *request)
+{
+	String token;
+	if (request->hasParam("token"))
+		token = request->getParam("token")->value();
+	else if (request->hasHeader("X-Session-Token"))
+		token = request->header("X-Session-Token");
+	else
+		return false;
+	std::lock_guard<std::mutex> lock(authMutex);
+	return sessions.validate(token.c_str(), uptimeMs());
+}
+
+// Reject cross-site WebSocket upgrades: a browser always sends Origin, and it
+// must name this device. Non-browser clients send no Origin; they still need
+// a token.
+static bool sameOrigin(AsyncWebServerRequest *request)
+{
+	if (!request->hasHeader("Origin"))
+		return true;
+	String origin = request->header("Origin");
+	int sep = origin.indexOf("://");
+	if (sep < 0)
+		return false;
+	String originHost = origin.substring(sep + 3);
+	return originHost.equalsIgnoreCase(request->host());
+}
+
+// Only this device's own addresses and names are served (core::hostAllowed:
+// DNS rebinding). Its Wi-Fi and hotspot IPs, the configured hotspot address
+// and 192.168.4.1 (the factory hotspot) always work, so nobody is locked out.
+// No Host at all (HTTP/1.0 tools) is not a browser page: allowed.
+static bool hostIsThisDevice(AsyncWebServerRequest *request)
+{
+	const String &host = request->host();
+	if (host.length() == 0)
+		return true;
+	String sta = WiFi.localIP().toString(), ap = WiFi.softAPIP().toString();
+	char apConf[16];
+	snprintf(apConf, sizeof(apConf), "%u.%u.%u.%u", config.accessPointIp.b[0], config.accessPointIp.b[1], config.accessPointIp.b[2], config.accessPointIp.b[3]);
+	String name(config.deviceHostname), local = name + ".local";
+	const char *allowed[] = {sta.c_str(), ap.c_str(), apConf, "192.168.4.1", name.c_str(), local.c_str()};
+	return core::hostAllowed(host.c_str(), allowed, sizeof(allowed) / sizeof(allowed[0]));
+}
+
+// The request currently writing a firmware image (only one at a time).
+static AsyncWebServerRequest *volatile updateOwner = NULL;
+
+// An Update upload is running (memoryGuardLoop() does not restart meanwhile).
+bool firmwareUpdateRunning()
+{
+	return updateOwner != NULL;
+}
+
+// One upload's state, on its request (_tempObject: calloc'd, freed with the
+// request). error: why it failed, sent back as the answer.
+struct UploadState
+{
+	bool busy;     // another upload was in progress
+	bool badImage; // refused by core::checkUpdateImageHead
+	bool stepUp;   // the admin password was not confirmed (403)
+	char error[160];
+};
+#if CONFIG_IDF_TARGET_ESP32S3
+#define UPDATE_IMAGE_CHIP core::IMAGE_CHIP_ESP32S3
+#else
+#define UPDATE_IMAGE_CHIP core::IMAGE_CHIP_ESP32
+#endif
+
+// Digest login state: nonces are single use (core::NonceStore); the opaque
+// value is fixed per boot.
+static core::NonceStore loginNonces;
+static char loginOpaque[core::NonceStore::NONCE_HEX + 1] = {0};
+
+static void sendDigestChallenge(AsyncWebServerRequest *request)
+{
+	char nonce[core::NonceStore::NONCE_HEX + 1];
+	{
+		std::lock_guard<std::mutex> lock(authMutex);
+		if (loginOpaque[0] == 0)
+		{
+			for (size_t i = 0; i < core::NonceStore::NONCE_HEX; i += 8)
+				snprintf(loginOpaque + i, 9, "%08lx", (unsigned long)hwRandom());
+		}
+		loginNonces.issue(hwRandom, uptimeMs(), nonce, remoteIpOf(request));
+	}
+	AsyncWebServerResponse *response = request->beginResponse(401, "text/plain", "Unauthorized");
+	response->addHeader("WWW-Authenticate", String("Digest realm=\"") + core::ADMIN_REALM + "\", qop=\"auth\", nonce=\"" + nonce + "\", opaque=\"" + loginOpaque + "\"");
+	response->addHeader("Cache-Control", "no-store");
+	request->send(response);
+}
+
+// Accepts only Digest, only with a nonce this device issued and has not seen
+// used. Basic is refused: it would put the password on the wire in clear.
+// adminHa1: the stored HA1 (core/adminpass.h), checked as a hash.
+static bool checkDigestLogin(AsyncWebServerRequest *request, const String &adminHa1, bool &countFailure)
+{
+	countFailure = false;
+	if (!request->hasHeader("Authorization"))
+		return false;
+	String auth = request->header("Authorization");
+	if (!auth.startsWith("Digest "))
+		return false;
+	String params = auth.substring(7);
+	char nonce[core::NonceStore::NONCE_HEX + 2];
+	if (!core::digestParam(params.c_str(), "nonce", nonce, sizeof(nonce)))
+		return false;
+	bool fresh;
+	{
+		std::lock_guard<std::mutex> lock(authMutex);
+		fresh = loginNonces.consume(nonce, uptimeMs());
+	}
+	if (!fresh)
+		return false;
+	bool ok = checkDigestAuthentication(params.c_str(), "GET", core::ADMIN_USER, adminHa1.c_str(), core::ADMIN_REALM, true, nonce, loginOpaque, NULL);
+	countFailure = !ok;
+	return ok;
+}
+
+// every request is checked for this device's name; the WebSocket and its handshake
+static void setupWebSocketRoute()
+{
+	// every request, the WebSocket upgrade included: another site's name
+	// for this device gets 421 and nothing else
+	server.addMiddleware([](AsyncWebServerRequest *request, ArMiddlewareNext next) {
+		if (!hostIsThisDevice(request))
+		{
+			request->send(421, "text/plain", "Misdirected request: open this reader by its IP address or its name");
+			return;
+		}
+		next();
+	});
+	ws.handleHandshake([](AsyncWebServerRequest *request) {
+		{
+			std::lock_guard<std::mutex> lock(authMutex);
+			if (loginLimiter.isBlocked(remoteIpOf(request), uptimeMs()))
+				return false;
+		}
+		return hostIsThisDevice(request) && sameOrigin(request) && hasValidSession(request);
+	});
+	ws.onEvent(onWsEvent);
+	server.addHandler(&ws);
+}
+
+// the firmware upload (/update)
+static void setupUpdateRoute()
+{
+	server.on("/update", HTTP_POST, [](AsyncWebServerRequest *request) {
+		if (adminSnapshot().mustChange)
+		{
+			request->send(403, "text/plain", "Change the default admin password first");
+			return;
+		}
+		UploadState *up = static_cast<UploadState *>(request->_tempObject);
+		if (up == NULL)
+		{
+			request->send(401, "text/plain", "Unauthorized");
+			return;
+		}
+		// the reason, not a bare FAIL: the page shows it
+		int status = up->busy ? 409 : up->stepUp ? 403 : up->error[0] ? (up->badImage ? 400 : 500) : restartRequested() ? 200 : 500;
+		AsyncWebServerResponse *response = request->beginResponse(status, "text/plain", status == 200 ? "OK" : up->error[0] ? up->error : "The update did not finish");
+		response->addHeader("Connection", "close");
+		request->send(response); }, [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+		// Upload state lives on the request (_tempObject is freed with it), so
+		// a second, unauthenticated upload cannot disturb one in progress.
+		if (index == 0)
+		{
+			if (!hasValidSession(request))
+			{
+				writeEvent("WARN", "updt", "Rejected firmware upload", request->client()->remoteIP().toString());
+				return;
+			}
+			// with the factory password anyone nearby could sign in and replace the firmware
+			if (adminSnapshot().mustChange)
+			{
+				writeEvent("WARN", "updt", "Rejected firmware upload: the admin password is still the default", request->client()->remoteIP().toString());
+				return;
+			}
+			UploadState *up = static_cast<UploadState *>(calloc(1, sizeof(UploadState)));
+			if (up == NULL)
+				return;
+			request->_tempObject = up;
+			// a session is not enough: the admin password too (core::stepUpProofOk)
+			String token = request->hasParam("token") ? request->getParam("token")->value() : request->header("X-Session-Token");
+			if (!stepUpValid(token.c_str(), request->header("X-Admin-Nonce").c_str(), request->header("X-Admin-Proof").c_str(), "update"))
+			{
+				up->stepUp = true;
+				core::setTextCut(up->error, "The admin password was not confirmed, so nothing was installed. Enter it and try again.");
+				writeEvent("WARN", "updt", "Rejected firmware upload: admin password not confirmed", request->client()->remoteIP().toString());
+				return;
+			}
+			if (updateOwner != NULL)
+			{
+				up->busy = true; // signed in, so not a 401: say why
+				core::setTextCut(up->error, "Another firmware upload is in progress");
+				writeEvent("WARN", "updt", "Rejected firmware upload: another upload is in progress", request->client()->remoteIP().toString());
+				return;
+			}
+			if (const char *bad = core::checkUpdateImageHead(data, len, UPDATE_IMAGE_CHIP))
+			{
+				up->badImage = true;
+				core::setTextCut(up->error, bad);
+				writeEvent("WARN", "updt", "Rejected firmware upload: not an update image for this board", filename.c_str());
+				return;
+			}
+			updateOwner = request;
+			request->onDisconnect([request]() {
+				if (updateOwner == request)
+				{
+					Update.abort();
+					updateOwner = NULL;
+					writeEvent("WARN", "updt", "Firmware upload aborted (client disconnected)", "");
+				}
+			});
+			writeEvent("INFO", "updt", "Firmware update started", filename.c_str());
+			if (!Update.begin(UPDATE_SIZE_UNKNOWN))
+			{
+				snprintf(up->error, sizeof(up->error), "The update could not start: %s", Update.errorString());
+				writeEvent("ERRO", "updt", "Not enough space to update", Update.errorString());
+			}
+		}
+		UploadState *up = static_cast<UploadState *>(request->_tempObject);
+		if (up == NULL || updateOwner != request)
+		{
+			return;
+		}
+		if (!Update.hasError() && Update.write(data, len) != len)
+		{
+			// e.g. "Not Enough Space": the image is larger than the update slot
+			snprintf(up->error, sizeof(up->error), "Writing the image failed: %s", Update.errorString());
+			writeEvent("ERRO", "updt", "Writing to flash is failed", Update.errorString());
+		}
+		if (final)
+		{
+			if (Update.end(true))
+			{
+				writeEvent("INFO", "updt", "Firmware update is finished", String(index + len) + " bytes");
+				if (!Update.hasError())
+					requestRestart("firmware update installed");
+			}
+			else
+			{
+				if (up->error[0] == 0)
+					snprintf(up->error, sizeof(up->error), "The update failed: %s", Update.errorString());
+				writeEvent("ERRO", "updt", "Update is failed", Update.errorString());
+			}
+			updateOwner = NULL;
+		} });
+}
+
+// the page and its files (gzipped in flash), and 404 for the rest
+static void setupPageRoutes()
+{
+	server.onNotFound([](AsyncWebServerRequest *request) {
+		request->send(404, "text/plain", "Not found");
+	});
+
+	server.on("/css/required.css", HTTP_GET, [](AsyncWebServerRequest *request) {
+		serveGz(request, "text/css", required_css_gz, required_css_gz_len);
+	});
+	server.on("/js/esprfid.js", HTTP_GET, [](AsyncWebServerRequest *request) {
+		serveGz(request, "text/javascript", esprfid_js_gz, esprfid_js_gz_len);
+	});
+	server.on("/img/ironframe-logo.svg", HTTP_GET, [](AsyncWebServerRequest *request) {
+		serveGz(request, "image/svg+xml", ironframe_logo_svg_gz, ironframe_logo_svg_gz_len);
+	});
+	server.on("/favicon.svg", HTTP_GET, [](AsyncWebServerRequest *request) {
+		serveGz(request, "image/svg+xml", ironframe_logo_svg_gz, ironframe_logo_svg_gz_len);
+	});
+	server.on("/index.html", HTTP_GET, [](AsyncWebServerRequest *request) {
+		serveGz(request, "text/html", index_html_gz, index_html_gz_len);
+	});
+	server.on("/esprfid.htm", HTTP_GET, [](AsyncWebServerRequest *request) {
+		serveGz(request, "text/html", esprfid_htm_gz, esprfid_htm_gz_len);
+	});
+}
+
+// sign-in (/login) and the session check (/session)
+static void setupSignInRoutes()
+{
+	// Is this session token still good? Asked by the page when its WebSocket
+	// would not open (a refused upgrade does not say why): 204 yes, 401 no
+	// (sign in again), 429 this address is locked out for now. Not a login:
+	// a stale token is not counted as a failure.
+	server.on("/session", HTTP_GET, [](AsyncWebServerRequest *request) {
+		bool blocked;
+		{
+			std::lock_guard<std::mutex> lock(authMutex);
+			blocked = loginLimiter.isBlocked(remoteIpOf(request), uptimeMs());
+		}
+		AsyncWebServerResponse *response = request->beginResponse(blocked ? 429 : hasValidSession(request) ? 204 : 401, "text/plain", "");
+		response->addHeader("Cache-Control", "no-store");
+		request->send(response);
+	});
+	// Digest authentication with single-use nonces: the password never crosses
+	// the network in clear (upstream used Basic over plain HTTP) and a captured
+	// exchange cannot be replayed. Success returns a session token that the UI
+	// presents on the WebSocket and on /update.
+	server.on("/login", HTTP_GET, [](AsyncWebServerRequest *request) {
+		uint32_t ip = remoteIpOf(request);
+		String remoteIP = request->client()->remoteIP().toString();
+		{
+			std::lock_guard<std::mutex> lock(authMutex);
+			if (loginLimiter.loginRefused(ip, uptimeMs()))
+			{
+				uint64_t waitS = (loginLimiter.refusedForMs(ip, uptimeMs()) + 999) / 1000;
+				AsyncWebServerResponse *response = request->beginResponse(429, "text/plain", "Too many failed logins, try again later");
+				response->addHeader("Retry-After", String((uint32_t)waitS));
+				request->send(response);
+				return;
+			}
+		}
+		AdminSnapshot admin = adminSnapshot();
+		bool countFailure = false;
+		if (!checkDigestLogin(request, admin.ha1, countFailure))
+		{
+			// A response to a nonce we issued counts as a guess; a bare first
+			// request (no Authorization) or a stale nonce just gets a challenge.
+			if (countFailure)
+			{
+				bool blocked;
+				{
+					std::lock_guard<std::mutex> lock(authMutex);
+					blocked = loginLimiter.recordFailure(ip, uptimeMs());
+				}
+				writeEvent("WARN", "websrv", blocked ? "Login blocked after repeated failures" : "Failed login attempt", remoteIP);
+			}
+			sendDigestChallenge(request);
+			return;
+		}
+		char token[core::SessionStore::TOKEN_HEX + 1];
+		{
+			std::lock_guard<std::mutex> lock(authMutex);
+			loginLimiter.recordSuccess(ip);
+			sessions.issue(hwRandom, uptimeMs(), token);
+		}
+		String body = String("{\"token\":\"") + token + "\",\"mustchangepassword\":" +
+					  (admin.mustChange ? "true" : "false") + "}";
+		AsyncWebServerResponse *response = request->beginResponse(200, "application/json", body);
+		response->addHeader("Cache-Control", "no-store");
+		request->send(response);
+		writeEvent("INFO", "websrv", "Login success!", remoteIP);
+	});
+}
+
+void setupWebServer()
+{
+	// one group each (review 7: one 205-line function)
+	setupWebSocketRoute();
+	setupUpdateRoute();
+	setupPageRoutes();
+	setupSignInRoutes();
+	server.rewrite("/", "/index.html");
+	server.begin();
+}

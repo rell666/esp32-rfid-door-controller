@@ -1,0 +1,1008 @@
+#define MAX_MQTT_MESSAGE 4096
+#define MQTT_QUEUE_MAX 16
+#define MQTT_QUEUE_SLICE_MS 100 // time processMqttQueue() may spend per loop() pass
+// All MQTT commands together, being assembled or queued (core::ByteBudget),
+// as for the WebSocket: 16 full-size commands were 64 KB of heap.
+#define MQTT_BYTES_MAX 12288
+
+// Payloads are copied here by the MQTT client task and parsed in loop().
+// Upstream reassembled them into a fixed 2 KB global buffer without a bounds
+// check, so any broker client could overflow it with one large message.
+struct MqttMessage
+{
+	std::string payload;
+	size_t charged = 0;    // bytes held in mqttBudget, given back once processed
+	uint64_t queuedAt = 0; // uptime ms
+	uint32_t link = 0;     // mqttLink when queued
+};
+static core::ByteBudget mqttBudget(MQTT_BYTES_MAX);
+std::deque<MqttMessage> mqttMessageQueue;
+std::mutex mqttQueueMutex;
+core::MessageAssembler mqttAssembler(MAX_MQTT_MESSAGE, &mqttBudget);
+// Counts disconnects: a door command queued on an earlier connection is
+// stale (core::mqttDoorCommandStale) and never runs after a reconnect.
+static std::atomic<uint32_t> mqttLink{0};
+
+static const char *applyConfigPolicy(JsonObject incoming);
+static void userListLoop();
+static void mqttConnectedLoop();
+static void mqttDroppedLoop();
+
+// Every publish goes through here: only while connected, and only while the
+// client's outbox holds fewer than MQTT_OUTBOX_MAX messages, so a broker that
+// stops reading cannot use up the heap (espMqttClient queues every publish
+// and sends it from the TCP task; it also refuses with under 16 KB free).
+// A refused message is counted; mqttDroppedLoop() logs the count.
+#define MQTT_OUTBOX_MAX 48
+static std::atomic<uint32_t> mqttDropped{0};
+
+static bool mqttSend(const char *topic, bool retain, const char *payload)
+{
+	if (!mqttClient.connected())
+		return false;
+	if (mqttClient.queueSize() >= MQTT_OUTBOX_MAX || mqttClient.publish(topic, 0, retain, payload) == 0)
+	{
+		mqttDropped++;
+		return false;
+	}
+	return true;
+}
+
+void publishDoorStates(); // door.esp
+bool doorbellRinging();   // doorbell.esp
+core::RelayBankView relayBank();
+
+void connectToMqtt()
+{
+	if (!config.mqttEnabled || mqttClient.connected()) {
+		return;
+	}
+#ifdef DEBUG
+	Serial.println("[ INFO ] Connecting MQTT");
+#endif
+	mqttClient.connect();
+}
+
+void disconnectMqtt()
+{
+	if (!config.mqttEnabled || !mqttClient.connected()) {
+		return;
+	}
+#ifdef DEBUG
+	Serial.println("[ INFO ] Disconnecting MQTT");
+#endif
+	mqttClient.disconnect(true);
+}
+
+void onMqttDisconnect(espMqttClientTypes::DisconnectReason reason)
+{
+	String reasonstr = espMqttClientTypes::disconnectReasonToString(reason);
+	mqttLink++;
+	writeEvent("WARN", "mqtt", "Disconnected from MQTT server", reasonstr);
+
+	// reconnect from loop() (see mqttLoop); this callback runs in the TCP task
+	mqttRetryAtS.store((uint32_t)(uptimeMs() / 1000) + 60);
+}
+
+void mqttLoop()
+{
+	if (!config.mqttEnabled)
+		return;
+	mqttConnectedLoop();
+	mqttDroppedLoop();
+	// send what loop() queued now: left to the TCP task, a card waited for its
+	// next poll (0.5-1.2 s to the broker, 0.35 s before; bench, ledger H30)
+	if (mqttClient.connected())
+		mqttClient.loop();
+	userListLoop();
+	if (mqttDisconnectRequested.exchange(false))
+	{
+		disconnectMqtt();
+		// a got-IP that arrived in the same window keeps its connect request
+		if (!mqttConnectRequested.load())
+			mqttRetryAtS.store((uint32_t)(uptimeMs() / 1000) + 60);
+	}
+	if (!WiFi.isConnected() || mqttClient.connected())
+		return;
+	uint32_t retryAt = mqttRetryAtS.load();
+	uint32_t nowS = (uint32_t)(uptimeMs() / 1000);
+	if (mqttConnectRequested.exchange(false) || (retryAt != 0 && nowS >= retryAt))
+	{
+		mqttRetryAtS.store(nowS + 60); // next attempt if this one fails silently
+		connectToMqtt();
+	}
+}
+
+void mqttPublishEvent(JsonDocument *root, String topic)
+{
+	if (config.mqttEnabled && mqttClient.connected())
+	{
+		String stopic(config.mqttTopic);
+		stopic = stopic + "/" + topic;
+		String mqttBuffer;
+		serializeJson(*root, mqttBuffer);
+		mqttSend(stopic.c_str(), false, mqttBuffer.c_str());
+#ifdef DEBUG
+		Serial.print("[ INFO ] Mqtt Publish:");
+		Serial.println(mqttBuffer);
+#endif
+	}
+}
+
+void mqttPublishEventHA(JsonDocument *root, String topic)
+{
+	if (config.mqttEnabled && mqttClient.connected())
+	{
+		String stopic = "homeassistant/";
+		stopic = stopic + topic;
+		String mqttBuffer;
+		serializeJson(*root, mqttBuffer);
+		mqttSend(stopic.c_str(), true, mqttBuffer.c_str());
+#ifdef DEBUG
+		Serial.print("[ INFO ] Mqtt Publish:");
+		Serial.println(mqttBuffer);
+#endif
+	}
+}
+
+void mqttPublishEvent(JsonDocument *root)
+{
+	mqttPublishEvent(root, "send");
+}
+
+// Used by the log queue (already serialized in writeEvent). False if it was
+// not sent (no broker connection): the caller writes it to the file instead.
+bool mqttPublishRawEvent(const String &payload)
+{
+	if (!config.mqttEnabled || !mqttClient.connected())
+		return false;
+	String stopic(config.mqttTopic);
+	stopic += "/send";
+	return mqttSend(stopic.c_str(), false, payload.c_str());
+}
+
+// result false: the command failed (message says why); deletuid and
+// deletusers used to answer as done whatever happened
+void mqttPublishAck(String command, bool result = true, const char *message = nullptr)
+{
+	DynamicJsonDocument root(512);
+	root["type"] = command;
+	root["result"] = result;
+	if (message)
+		root["message"] = message;
+	root["ip"] = WiFi.localIP().toString();
+	root["hostname"] = config.deviceHostname;
+	mqttPublishEvent(&root);
+}
+
+// An alarm on TOPIC/send whatever the event-log setting: with MQTT logging
+// off, events go to the device's file only and nobody watching MQTT hears.
+void mqttPublishAlarm(const char *src, const String &desc, const String &data)
+{
+	DynamicJsonDocument root(768);
+	root["type"] = "alarm";
+	root["src"] = src;
+	root["desc"] = desc;
+	root["data"] = data;
+	root["time"] = deviceClock.epoch;
+	root["hostname"] = config.deviceHostname;
+	mqttPublishEvent(&root);
+}
+
+void mqttPublishBoot(time_t boot_time)
+{
+	DynamicJsonDocument root(512);
+	root["type"] = "boot";
+	root["time"] = boot_time;
+	root["uptime"] = "0";
+	root["ip"] = WiFi.localIP().toString();
+	root["hostname"] = config.deviceHostname;
+	mqttPublishEvent(&root);
+}
+
+// A Home Assistant sensor read from the card topic (<topic>/tag): Tag, User,
+// Access, DoorName, Time differ only in these (review 7: discovery was one
+// 161-line function).
+static void haTagSensor(const String &deviceName, const String &mtopic, JsonDocument &via, const char *key, const char *name,
+						const char *uniq, const char *tpl, const char *icon)
+{
+	DynamicJsonDocument d(512);
+	String topic = "sensor/" + deviceName + "/" + key + "/config";
+	d["name"] = name;
+	d["uniq_id"] = deviceName + "/" + uniq;
+	d["stat_t"] = mtopic + "/tag";
+	d["avty_t"] = mtopic + "/avty";
+	d["val_tpl"] = tpl;
+	d["json_attr_t"] = mtopic + "/tag";
+	d["icon"] = icon;
+	d["dev"] = via;
+	mqttPublishEventHA(&d, topic);
+}
+
+void mqttPublishDiscovery()
+{
+	String mtopic(config.mqttTopic);
+	String topic;
+	String deviceName = config.deviceHostname;
+	String deviceIP = WiFi.localIP().toString();
+	DynamicJsonDocument via(512);
+	via["ids"] = WiFi.macAddress();
+
+	DynamicJsonDocument dev(512);
+	dev["ids"] = WiFi.macAddress();
+	dev["name"] = config.deviceHostname;
+	dev["mf"] = "esp-rfid";
+	dev["sw"] = VERSION;
+	String num;
+	bool devSent = false;
+	for (int n = 0; n < config.numRelays; n++)
+	{
+		DynamicJsonDocument root(512);
+		num = String(n);
+		topic = "lock/" + deviceName + "/lock" + num + "/config";
+		if (!config.mqttDoorControl || config.relayPin[n] == 255)
+		{
+			// no lock entity (and no unlock payload) while MQTT door control
+			// is off, or for a relay with no pin (nothing to lock); the empty
+			// retained config removes one announced before
+			if (mqttClient.connected())
+				mqttSend(("homeassistant/" + topic).c_str(), true, "");
+			continue;
+		}
+		root["name"] = deviceName + " Lock" + num;
+		root["uniq_id"] = deviceName + "/lock" + num;
+		root["stat_t"] = mtopic + "/io/lock" + num;
+		root["cmd_t"] = mtopic + "/cmd";
+		root["pl_unlk"] = "{cmd:'open', door:'" + num + "', doorip:'" + deviceIP + "'}";
+		root["pl_lock"] = "{cmd:'close', door:'" + num + "', doorip:'" + deviceIP + "'}";
+		root["avty_t"] = mtopic + "/avty";
+		root["dev"] = devSent ? via : dev; // the full device once, on the first lock announced
+		devSent = true;
+		mqttPublishEventHA(&root, topic);
+	}
+
+	for (int i = 0; i < config.numRelays; i++)
+	{
+		if (config.doorPin[i] == 255)
+			continue;
+		// door 1 keeps upstream's ids and topics; door n adds its number
+		String n = i == 0 ? String("") : String(i + 1);
+		String label = config.doorName[i][0] ? String(config.doorName[i]) : (i == 0 ? String("Door") : "Door " + n);
+		DynamicJsonDocument door(512);
+		topic = "binary_sensor/" + deviceName + "/door" + n + "/config";
+		door["name"] = label;
+		door["uniq_id"] = deviceName + "/door" + n;
+		door["stat_t"] = mtopic + "/io/door" + n;
+		door["avty_t"] = mtopic + "/avty";
+		door["dev_cla"] = "door";
+		door["dev"] = via;
+		mqttPublishEventHA(&door, topic);
+
+		DynamicJsonDocument tamper(512);
+		topic = "binary_sensor/" + deviceName + "/tamper" + n + "/config";
+		tamper["name"] = label + " tamper";
+		tamper["uniq_id"] = deviceName + "/tamper" + n;
+		tamper["stat_t"] = mtopic + "/io/tamper" + n;
+		tamper["avty_t"] = mtopic + "/avty";
+		tamper["dev_cla"] = "safety";
+		tamper["dev"] = via;
+		mqttPublishEventHA(&tamper, topic);
+	}
+
+	if (config.doorbellpin != 255)
+	{
+		DynamicJsonDocument doorbell(512);
+		topic = "binary_sensor/" + deviceName + "/doorbell/config";
+		doorbell["name"] = "Doorbell";
+		doorbell["uniq_id"] = deviceName + "/doorbell";
+		doorbell["stat_t"] = mtopic + "/io/doorbell";
+		doorbell["avty_t"] = mtopic + "/avty";
+		doorbell["dev_cla"] = "sound";
+		doorbell["icon"] = "mdi:bell";
+		doorbell["dev"] = via;
+		mqttPublishEventHA(&doorbell, topic);
+	}
+
+	haTagSensor(deviceName, mtopic, via, "tag", "Tag", "tag", "{{ value_json.uid }}", "mdi:key");
+
+	haTagSensor(deviceName, mtopic, via, "user", "User", "name", "{{ value_json.username }}", "mdi:human");
+
+	// Upstream's "PinCode" sensor showed every typed PIN in Home Assistant.
+	// PINs are no longer published; an empty retained config removes the
+	// entity a previous version created.
+	if (config.mqttEnabled && mqttClient.connected())
+		mqttSend(("homeassistant/sensor/" + deviceName + "/pincode/config").c_str(), true, "");
+
+	haTagSensor(deviceName, mtopic, via, "access", "Access", "access", "{{ value_json.access }}", "mdi:lock-question");
+
+	haTagSensor(deviceName, mtopic, via, "doorname", "DoorName", "doorname", "{{ value_json.doorName }}", "mdi:door");
+
+	haTagSensor(deviceName, mtopic, via, "time", "Time", "time", "{{ value_json.time }}", "mdi:lock-clock");
+
+	DynamicJsonDocument dellog(512);
+	topic = "button/" + deviceName + "/dellog/config";
+	dellog["name"] = deviceName + " Delete Log";
+	dellog["uniq_id"] = deviceName + "/deletlog";
+	dellog["cmd_t"] = mtopic + "/cmd";
+	dellog["payload_press"] = "{cmd:'deletlog', doorip:'" + deviceIP + "'}";
+	dellog["avty_t"] = mtopic + "/avty";
+	dellog["dev"] = via;
+	mqttPublishEventHA(&dellog, topic);
+}
+
+void mqttPublishAvty()
+{
+	String mtopic(config.mqttTopic);
+	String avty_topic = mtopic + "/avty";
+	String payloadString = "online";
+	mqttSend(avty_topic.c_str(), true, payloadString.c_str());
+#ifdef DEBUG
+	Serial.println("[ INFO ] Mqtt Publish: online @ " + avty_topic);
+#endif
+}
+
+void mqttPublishHeartbeat(time_t heartbeat, time_t uptime)
+{
+	DynamicJsonDocument root(512);
+	root["type"] = "heartbeat";
+	root["time"] = heartbeat;
+	root["uptime"] = uptime;
+	root["ip"] = WiFi.localIP().toString();
+	root["hostname"] = config.deviceHostname;
+	mqttPublishEvent(&root);
+}
+
+// The card number as the MQTT setting says: last 4 (default), all, or no
+// uid field (core::mqttAccessUid). getuserlist is not affected.
+static void addAccessUid(JsonDocument &root, String const &uid)
+{
+	std::string shown;
+	if (core::mqttAccessUid(uid.c_str(), config.mqttCardUid, shown))
+		root["uid"] = String(shown.c_str()); // a String: ArduinoJson copies it
+}
+
+// No PIN in an access message: a PIN-only user's uid is shown as "keypad"
+// by the caller, and the typed PIN is never sent (upstream published it).
+// getuserlist leaves PINs out too (core::publicUserRecord).
+void mqttPublishAccess(time_t accesstime, String const &isknown, String const &type, String const &user, String const &uid, int door = -1, const char *dir = nullptr)
+{
+	DynamicJsonDocument root(512);
+	if (config.mqttEvents)
+	{
+		root["cmd"] = "log";
+	}
+
+	addAccessUid(root, uid);
+	root["username"] = user;
+	root["access"] = type;
+
+	root["time"] = accesstime;
+	
+	root["doorName"] = door >= 0 ? doorLabel(door) : config.doorName[0];
+	if (door >= 0)
+		root["door"] = door;
+	if (dir)
+		root["direction"] = dir;
+
+	if (!config.mqttHA)
+	{
+		root["type"] = "access";
+		root["isKnown"] = isknown;
+		root["hostname"] = config.deviceHostname;
+		mqttPublishEvent(&root);
+	}
+	else
+	{
+		mqttPublishEvent(&root, "tag");
+	}
+}
+
+void mqttPublishAccess(time_t accesstime, String const &isknown, int types[MAX_NUM_RELAYS], String const &user, String const &uid, const char *dir = nullptr)
+{
+	DynamicJsonDocument root(512);
+	if (dir)
+		root["direction"] = dir;
+	JsonArray access = root.createNestedArray("access");
+	JsonArray doorNames = root.createNestedArray("doorName");
+	if (config.mqttEvents)
+	{
+		root["cmd"] = "log";
+	}
+
+	// one entry per door in both arrays, whatever the stored role
+	for (int i = 0; i < config.numRelays; i++)
+	{
+		access.add(core::accessTypeName(types[i]));
+		doorNames.add(config.doorName[i]);
+	}
+
+	addAccessUid(root, uid);
+	root["username"] = user;
+
+	root["time"] = accesstime;
+
+	if (!config.mqttHA)
+	{
+		root["type"] = "access";
+		root["isKnown"] = isknown;
+		root["hostname"] = config.deviceHostname;
+		mqttPublishEvent(&root);
+	}
+	else
+	{
+		mqttPublishEvent(&root, "tag");
+	}
+}
+
+void mqttPublishIo(String const &io, String const &state)
+{
+	if (config.mqttHA && config.mqttEnabled && mqttClient.connected())
+	{
+		String mtopic(config.mqttTopic);
+		String topic = mtopic + "/io/" + io;
+
+		mqttSend(topic.c_str(), false, state.c_str());
+
+#ifdef DEBUG
+		Serial.print("[ INFO ] Mqtt Publish: ");
+		Serial.println(state + " @ " + topic);
+#endif
+	}
+}
+
+void onMqttPublish(uint16_t packetId)
+{
+#ifdef DEBUG
+	Serial.printf("[ INFO ] MQTT publish acknowledged: %u\n", packetId);
+#endif
+}
+
+// One message per user, without the PIN (core::publicUserRecord). Only
+// user records: the .bak/.tmp an atomic write leaves are skipped, as the
+// WebSocket user list does. One user per loop() pass (userListLoop), by
+// name: the whole list in one pass opened every file, about 9 s of loop()
+// with 200 users, with no card decided meanwhile (review 7). From the RAM
+// index once it is built (no file opened); a uid cursor, so users added or
+// removed meanwhile do not upset it.
+static File userListDir;
+static bool userListFromIndex = false;
+static std::string userListAfter;
+
+void getUserList()
+{
+#ifdef DEBUG
+	Serial.println("[ INFO ] getUserList");
+#endif
+	userListDir.close(); // a second request starts again
+	userListFromIndex = userIndex.ready();
+	userListAfter.clear();
+	if (userListFromIndex)
+		return;
+	userListDir = LittleFS.open("/P");
+	if (userListDir && !userListDir.isDirectory())
+		userListDir.close();
+}
+
+static void userListLoop()
+{
+	if (userListFromIndex)
+	{
+		const core::UserEntry *e = mqttClient.connected() ? userIndex.after(userListAfter) : nullptr;
+		if (e == nullptr)
+		{
+			userListFromIndex = false; // done, or the broker went away
+			return;
+		}
+		userListAfter = e->uid;
+		DynamicJsonDocument rec(512);
+		core::UserIndex::toRecord(*e, rec.to<JsonObject>(), false);
+		DynamicJsonDocument out(1024);
+		core::publicUserRecord(e->uid.c_str(), rec.as<JsonObjectConst>(), out.to<JsonObject>());
+		mqttPublishEvent(&out);
+		return;
+	}
+	if (!userListDir)
+		return;
+	String name;
+	bool isDir = false;
+	if (!mqttClient.connected() || !nextFileName(userListDir, name, isDir))
+	{
+		userListDir.close(); // done, or the broker went away: a new request starts again
+		return;
+	}
+	if (isDir || !core::isValidUid(name.c_str()))
+		return;
+	File f = LittleFS.open("/P/" + name, "r");
+	if (!f)
+		return;
+	DynamicJsonDocument json(1024);
+	auto error = deserializeJson(json, f);
+	f.close();
+	if (error)
+		return;
+	DynamicJsonDocument out(1024);
+	core::publicUserRecord(name.c_str(), json.as<JsonObjectConst>(), out.to<JsonObject>());
+	mqttPublishEvent(&out);
+}
+
+// /P for core::removeAllUserFiles
+struct UserDirIo
+{
+	size_t list(bool backups, char (*out)[core::USER_FILE_PATH_MAX], size_t max)
+	{
+		size_t n = 0;
+		File dir = LittleFS.open("/P");
+		if (!dir || !dir.isDirectory())
+			return 0;
+		String name;
+		bool isDir = false;
+		while (n < max && nextFileName(dir, name, isDir)) // names only (storage.esp)
+		{
+			esp_task_wdt_reset(); // one pass over every user: yield() does not feed the loop watchdog
+			if (isDir)
+				continue;
+			bool bak = name.endsWith(".bak");
+			if (bak == backups)
+				snprintf(out[n++], core::USER_FILE_PATH_MAX, "/P/%s", name.c_str());
+		}
+		dir.close();
+		return n;
+	}
+	bool remove(const char *path)
+	{
+		esp_task_wdt_reset(); // a removal can take a while on a full filesystem
+		return LittleFS.remove(path) || !LittleFS.exists(path);
+	}
+};
+
+// true if every file in /P is gone (in batches: core::removeAllUserFiles)
+bool deleteAllUserFiles()
+{
+	UserDirIo io;
+	bool ok = core::removeAllUserFiles(io);
+	userIndexReset(); // rebuilt from what is left
+	return ok;
+}
+
+// Runs in the MQTT client's TCP task: only reassemble and queue.
+void onMqttMessage(const espMqttClientTypes::MessageProperties &properties, const char *topic, const uint8_t *payload, size_t len, size_t index, size_t total)
+{
+	if (index == 0)
+		mqttAssembler.reset(total);
+	mqttAssembler.append(payload, len);
+	if (index + len != total)
+		return;
+	if (mqttAssembler.overflowed())
+	{
+		bool busy = mqttAssembler.refusedByBudget();
+		mqttAssembler.take();
+		writeEvent("WARN", "mqtt", busy ? "Dropped MQTT message: too many queued" : "Dropped oversized MQTT message", String(total) + " bytes");
+		return;
+	}
+	MqttMessage m;
+	m.payload = mqttAssembler.take(&m.charged);
+	// A retained command is replayed by the broker on every subscribe, so a
+	// retained "opendoor" opened the door after every reconnect or restart
+	// (and a retained "deletusers" would empty the user list each time).
+	// Commands are never retained; drop every one that is.
+	if (core::mqttCommandRefused(properties.retain))
+	{
+		mqttBudget.give(m.charged);
+		writeEvent("WARN", "mqtt", "Dropped a retained MQTT command (commands must be sent with retain off)", String(total) + " bytes");
+		return;
+	}
+	// not for this device: never queued (the exact doorip check is in loop())
+	if (!core::payloadMayNameIp(m.payload, WiFi.localIP().toString().c_str()))
+	{
+		mqttBudget.give(m.charged);
+		return;
+	}
+	m.queuedAt = uptimeMs();
+	m.link = mqttLink.load();
+	std::lock_guard<std::mutex> lock(mqttQueueMutex);
+	if (mqttMessageQueue.size() >= MQTT_QUEUE_MAX)
+	{
+		mqttBudget.give(m.charged);
+		return;
+	}
+	mqttMessageQueue.push_back(std::move(m));
+}
+
+static void mqttCmdGetUserList(const char *, JsonDocument &)
+{
+	getUserList();
+}
+
+static void mqttCmdOpenDoor(const char *, JsonDocument &)
+{
+	writeLatest(" ", "MQTT", 1);
+	mqttPublishAccess(deviceClock.epoch, "true", "Always", "MQTT", " ");
+	// only the locked ones, as "open" does: a held-open continuous relay
+	// would be toggled shut
+	for (int currentRelay = 0; currentRelay < config.numRelays; currentRelay++)
+		if (relayLockedNow(currentRelay))
+			activateRelay[currentRelay] = true;
+}
+
+static void mqttCmdOpenClose(const char *command, JsonDocument &mqttIncomingJson)
+{
+	bool open = strcmp(command, "open") == 0;
+	// door may arrive as "0" or 0 (core::mqttDoorIndex)
+	core::MqttDoor door = core::mqttDoorIndex(mqttIncomingJson["door"], config.numRelays);
+	int currentRelay = door.index;
+	if (currentRelay < 0)
+	{
+		// never log the raw value: it is attacker-controlled
+		writeEvent("WARN", "mqtt", "Invalid door index", String((unsigned)door.textLen) + " chars");
+		return;
+	}
+	if (config.relayPin[currentRelay] == 255)
+		return; // no pin configured for this door
+	int active = config.relayUnlock[currentRelay] ? HIGH : LOW; // the unlock level
+	if (open)
+	{
+		writeLatest(" ", "MQTT", 1, ACCESS_GRANTED, currentRelay);
+		mqttPublishAccess(deviceClock.epoch, "true", "Always", "MQTT", " ", currentRelay);
+		if (relayLockedNow(currentRelay))
+			activateRelay[currentRelay] = true;
+	}
+	else
+	{
+		activateRelay[currentRelay] = false;
+		relayTimers[currentRelay].stop();
+		relayCancelPulse(currentRelay);
+		if (digitalRead(config.relayPin[currentRelay]) == active)
+		{
+			digitalWrite(config.relayPin[currentRelay], !active);
+			mqttPublishIo("lock" + String(currentRelay), "LOCKED");
+		}
+	}
+}
+
+static void mqttCmdDeleteUsers(const char *command, JsonDocument &)
+{
+	if (deleteAllUserFiles())
+		mqttPublishAck(command);
+	else
+	{
+		writeEvent("ERRO", "mqtt", "deletusers failed: some users could not be removed", "");
+		mqttPublishAck(command, false, "Some users could not be removed");
+	}
+}
+
+static void mqttCmdDeleteUid(const char *command, JsonDocument &mqttIncomingJson)
+{
+	const char *uid = mqttIncomingJson["uid"];
+	if (!core::isValidUid(uid))
+	{
+		writeEvent("WARN", "mqtt", "deletuid refused", "Invalid uid");
+		mqttPublishAck(command, false, "Invalid uid");
+	}
+	else if (removeUserFiles(uid))
+		mqttPublishAck(command);
+	else
+	{
+		writeEvent("ERRO", "mqtt", "deletuid failed: the user could not be removed", uid);
+		mqttPublishAck(command, false, "The user could not be removed");
+	}
+}
+
+static void mqttCmdAddUser(const char *command, JsonDocument &mqttIncomingJson)
+{
+	DynamicJsonDocument record(1024);
+	if (const char *problem = core::checkUserRecord(mqttIncomingJson.as<JsonObjectConst>(), record.to<JsonObject>()))
+	{
+		writeEvent("WARN", "mqtt", "adduser refused", problem);
+		mqttPublishAck(command, false, problem);
+		return;
+	}
+	// an admin card (access 99) opens outside the opening hours and turns
+	// the Wi-Fi back on: enrolled from the web page only, never over MQTT
+	if (core::isAdminRecord(record.as<JsonObjectConst>()))
+	{
+		writeEvent("WARN", "mqtt", "adduser refused", "Remote admin cannot add admin cards (access 99); use the web page");
+		mqttPublishAck(command, false, "Remote admin cannot add admin cards (access 99); use the web page");
+		return;
+	}
+	String path = String("/P/") + (const char *)record["uid"];
+	bool isNew = !LittleFS.exists(path) && !LittleFS.exists(path + ".bak");
+	static_assert(core::MAX_USERS == 200, "the limit is written in the messages below");
+	if (isNew && core::userLimitReached(storedUserCount()))
+	{
+		writeEvent("WARN", "mqtt", "adduser refused", "The user limit (200) is reached");
+		mqttPublishAck(command, false, "The user limit (200) is reached");
+		return;
+	}
+	if (isNew && !fsFreeAtLeast(core::USER_MIN_FREE_BYTES))
+	{
+		writeEvent("WARN", "mqtt", "adduser refused", "Storage is nearly full: no more users can be added");
+		mqttPublishAck(command, false, "Storage is nearly full");
+		return;
+	}
+	if (writeJsonFileAtomic(path.c_str(), record))
+		mqttPublishAck(command);
+	else
+	{
+		writeEvent("ERRO", "mqtt", "adduser write failed", "");
+		mqttPublishAck(command, false, "The user could not be saved");
+	}
+}
+
+static void mqttCmdDeleteLog(const char *command, JsonDocument &)
+{
+	logMaintenance("delete", "/latestlog.json.1", 0);
+	logMaintenance("delete", "/eventlog.json", 0);
+	logMaintenance("rollover", "/latestlog.json", 0);
+	mqttPublishAck(command);
+}
+
+static void mqttCmdGetConf(const char *, JsonDocument &)
+{
+	DynamicJsonDocument configFile(8192);
+	if (readConfigDoc(configFile))
+	{
+		core::maskSecrets(configFile.as<JsonObject>());
+		DynamicJsonDocument root(10240);
+		root["type"] = "getconf";
+		root["ip"] = WiFi.localIP().toString();
+		root["hostname"] = config.deviceHostname;
+		root["configfile"] = configFile;
+		mqttPublishEvent(&root);
+	}
+}
+
+static void mqttCmdUpdateConf(const char *command, JsonDocument &mqttIncomingJson)
+{
+	JsonObject incoming = mqttIncomingJson["configfile"];
+	if (incoming.isNull())
+		return;
+	// the settings in force: needed for the masked passwords and for
+	// everything remote admin cannot change (core::REMOTE_ADMIN_KEPT)
+	DynamicJsonDocument existing(8192);
+	if (!readConfigDoc(existing))
+	{
+		writeEvent("ERRO", "mqtt", "updateconf refused: the stored settings could not be read", "");
+		return;
+	}
+	DynamicJsonDocument out(8192);
+	out.set(incoming);
+	core::mergeSecrets(out.as<JsonObject>(), existing.as<JsonObjectConst>());
+	std::vector<std::string> ignored;
+	core::keepRemoteAdminKept(out.as<JsonObject>(), existing.as<JsonObjectConst>(), ignored);
+	if (out.overflowed())
+	{
+		writeEvent("WARN", "mqtt", "updateconf refused", "the settings are too large for the device to read");
+		return;
+	}
+	const char *problem = applyConfigPolicy(out.as<JsonObject>());
+	if (problem)
+	{
+		writeEvent("WARN", "mqtt", "updateconf refused", problem);
+		return;
+	}
+	String list;
+	for (const std::string &key : ignored)
+		list += (list.length() ? ", " : "") + String(key.c_str());
+	if (!ignored.empty())
+		writeEvent("WARN", "mqtt", "updateconf: kept the stored values of settings remote admin cannot change", list.length() > 400 ? list.substring(0, 400) + "..." : list);
+	if (writeConfigDoc(out))
+	{
+		// the ack names what was not changed
+		DynamicJsonDocument ack(1024 + 48 * ignored.size());
+		ack["type"] = "updateconf";
+		ack["ip"] = WiFi.localIP().toString();
+		ack["hostname"] = config.deviceHostname;
+		JsonArray kept = ack.createNestedArray("ignored");
+		for (const std::string &key : ignored)
+			kept.add(key.c_str()); // not copied: `ignored` outlives the publish
+		mqttPublishEvent(&ack);
+		requestRestart("MQTT updateconf");
+	}
+}
+
+// MQTT commands: one handler each (review 7: processMqttMessage was one
+// 229-line chain). Which run at all is core::mqttGate's decision, above.
+typedef void (*MqttHandler)(const char *command, JsonDocument &msg);
+static const struct
+{
+	const char *name;
+	MqttHandler handler;
+} mqttCommands[] = {
+	{"getuserlist", mqttCmdGetUserList},
+	{"opendoor", mqttCmdOpenDoor},
+	{"open", mqttCmdOpenClose},
+	{"close", mqttCmdOpenClose},
+	{"deletusers", mqttCmdDeleteUsers},
+	{"deletuid", mqttCmdDeleteUid},
+	{"adduser", mqttCmdAddUser},
+	{"deletlog", mqttCmdDeleteLog},
+	{"getconf", mqttCmdGetConf},
+	{"updateconf", mqttCmdUpdateConf},
+};
+
+void processMqttMessage(const MqttMessage &msg)
+{
+	const std::string &payload = msg.payload;
+#ifdef DEBUG
+	Serial.print("[ INFO ] JSON msg: ");
+	Serial.println(payload.c_str());
+#endif
+	DynamicJsonDocument mqttIncomingJson(MAX_MQTT_MESSAGE + 1024);
+	auto error = deserializeJson(mqttIncomingJson, payload.c_str(), payload.size());
+	if (error)
+	{
+#ifdef DEBUG
+		Serial.println("[ INFO ] Failed parsing MQTT message");
+#endif
+		return;
+	}
+
+	// Commands are only accepted when they name this device's IP, and only
+	// with remote admin / door control on (core::mqttGate)
+	const char *command = mqttIncomingJson["cmd"];
+	String espIp = WiFi.localIP().toString();
+	bool stale = core::mqttDoorCommandStale(msg.queuedAt, msg.link, uptimeMs(), mqttLink.load());
+	switch (core::mqttGate(mqttIncomingJson["doorip"].as<const char *>(), espIp.c_str(), command, config.mqttRemoteAdmin, config.mqttDoorControl, stale))
+	{
+	case core::MqttGate::Run:
+		break;
+	case core::MqttGate::NotForThisDevice:
+		return;
+	case core::MqttGate::NoCommand:
+#ifdef DEBUG
+		Serial.println("[ INFO ] No cmd key in MQTT message");
+#endif
+		return;
+	case core::MqttGate::AdminDisabled:
+		writeEvent("WARN", "mqtt", "Refused MQTT admin command (remote admin disabled)", command);
+		return;
+	case core::MqttGate::DoorControlDisabled:
+	{
+		// once per boot: a Home Assistant automation could repeat it all day
+		static bool logged = false;
+		if (!logged)
+			writeEvent("WARN", "mqtt", "Ignored MQTT door command (MQTT door control disabled; logged once until restart)", command);
+		logged = true;
+		return;
+	}
+	case core::MqttGate::Stale:
+		writeEvent("WARN", "mqtt", "Dropped a stale MQTT door command (sent before a reconnect, or too long ago)", command);
+		return;
+	}
+
+	for (const auto &c : mqttCommands)
+		if (strcmp(command, c.name) == 0)
+		{
+			c.handler(command, mqttIncomingJson);
+			return;
+		}
+}
+
+void onMqttSubscribe(uint16_t packetId, const espMqttClientTypes::SubscribeReturncode *codes, size_t len)
+{
+#ifdef DEBUG
+	Serial.printf("[ INFO ] Subscribe acknowledged: packetId %u, %u topic(s)\n", packetId, (unsigned)len);
+#endif
+}
+
+// The TCP task only notes the connection; the subscribe, the boot message
+// and the Home Assistant states go out from loop() (mqttConnectedLoop): they
+// read settings and door pins that loop() owns, and AsyncMqttClient was
+// published to from both tasks at once (review 7).
+static std::atomic<int> mqttConnectedEvent{0}; // 0 none, 1 connected, 2 with a session present
+
+void onMqttConnect(bool sessionPresent)
+{
+	mqttConnectedEvent.store(sessionPresent ? 2 : 1);
+}
+
+static void mqttConnectedLoop()
+{
+	int ev = mqttConnectedEvent.exchange(0);
+	if (ev == 0 || !mqttClient.connected())
+		return;
+	bool sessionPresent = ev == 2;
+#ifdef DEBUG
+	Serial.println("[ INFO ] MQTT Connected session");
+#endif
+	if (sessionPresent == true)
+	{
+#ifdef DEBUG
+		Serial.println("[ INFO ] MQTT session Present: True");
+#endif
+		writeEvent("INFO", "mqtt", "Connected to MQTT Server", "Session Present");
+	}
+	mqttPublishBoot(deviceClock.epoch);
+
+	String stopic(config.mqttTopic);
+	stopic = stopic + "/cmd";
+	mqttClient.subscribe(stopic.c_str(), 2);
+
+	if (config.mqttHA)
+	{
+		mqttPublishDiscovery();
+		mqttPublishAvty();
+		publishDoorStates(); // door and tamper, per door with a contact
+		if (config.doorbellpin != 255)
+		{
+			mqttPublishIo("doorbell", doorbellRinging() ? "ON" : "OFF");
+		}
+		for (int i = 0; i < config.numRelays; i++)
+		{
+			if (config.relayPin[i] == 255)
+				continue; // no relay: nothing to read
+			mqttPublishIo("lock" + String(i), relayLockedNow(i) ? "LOCKED" : "UNLOCKED");
+		}
+	}
+}
+
+// At most one Event Log line a minute about messages the outbox refused.
+static void mqttDroppedLoop()
+{
+	static uint64_t nextAt = 0;
+	uint64_t now = uptimeMs();
+	if (now < nextAt)
+		return;
+	nextAt = now + 60000;
+	uint32_t n = mqttDropped.exchange(0);
+	if (n > 0)
+		writeEvent("WARN", "mqtt", "MQTT messages dropped", String(n) + " in the last minute: the broker is not keeping up, or memory is low");
+}
+
+void processMqttQueue()
+{
+	// At most MQTT_QUEUE_SLICE_MS per loop() pass (at least one message), as
+	// processWsQueue(); the rest waits for the next pass.
+	uint64_t until = uptimeMs() + MQTT_QUEUE_SLICE_MS;
+	for (;;)
+	{
+		if (uptimeMs() >= until)
+			return;
+		MqttMessage msg;
+		{
+			std::lock_guard<std::mutex> lock(mqttQueueMutex);
+			if (mqttMessageQueue.empty())
+				return;
+			msg = std::move(mqttMessageQueue.front());
+			mqttMessageQueue.pop_front();
+		}
+		processMqttMessage(msg);
+		mqttBudget.give(msg.charged);
+		esp_task_wdt_reset(); // as processWsQueue: several commands may each write flash
+		yield();
+	}
+}
+
+void setupMqtt()
+{
+  if (!config.mqttEnabled)
+	{
+		return;
+	}
+
+#ifdef DEBUG
+	Serial.println("[ INFO ] Trying to setup MQTT");
+#endif
+	if (config.mqttHA)
+	{
+		String stopic(config.mqttTopic);
+		String topicString = stopic + "/avty";
+		String payloadString = "offline";
+		char *topicLWT = strdup(topicString.c_str());
+		char *payloadLWT = strdup(payloadString.c_str());
+		mqttClient.setWill(topicLWT, 2, true, payloadLWT);
+	}
+	// the client id AsyncMqttClient used ("esp32-" + MAC), so a broker sees
+	// the same client after the update (espMqttClient's own has no hyphen)
+	static char clientId[24];
+	snprintf(clientId, sizeof(clientId), "esp32-%06llx", ESP.getEfuseMac());
+	mqttClient.setClientId(clientId);
+	mqttClient.setServer(config.mqttHost, config.mqttPort);
+	mqttClient.setCredentials(config.mqttUser, config.mqttPass);
+	mqttClient.onDisconnect(onMqttDisconnect);
+	mqttClient.onPublish(onMqttPublish);
+	mqttClient.onSubscribe(onMqttSubscribe);
+	mqttClient.onConnect(onMqttConnect);
+	mqttClient.onMessage(onMqttMessage);
+	mqttConnectRequested = true;
+}

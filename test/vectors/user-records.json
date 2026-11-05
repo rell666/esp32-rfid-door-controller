@@ -1,0 +1,385 @@
+{
+ "about": "User record vectors (core/userrecord.h checkUserRecord). Asserted by test/native/tests.cpp against the firmware code and by test/e2e/run.mjs against the simulator (device-sim.mjs). Each case starts from base, applies set (key -> value; null removes the key), and expects problem (exact message, or null) and, when accepted, exactly the stored record.",
+ "base": {
+  "command": "userfile",
+  "uid": "04a1b2c3",
+  "user": "Alice",
+  "pincode": "",
+  "acctype": 1,
+  "acctype2": 0,
+  "validsince": 0,
+  "validuntil": 2145916800
+ },
+ "cases": [
+  {
+   "name": "a card user from the editor",
+   "set": {},
+   "problem": null,
+   "stored": {
+    "uid": "04a1b2c3",
+    "user": "Alice",
+    "pincode": "",
+    "acctype": 1,
+    "acctype2": 0,
+    "acctype3": 0,
+    "acctype4": 0,
+    "validsince": 0,
+    "validuntil": 2145916800
+   }
+  },
+  {
+   "name": "only known keys are stored (command, cmd, doorip and others dropped)",
+   "set": {
+    "cmd": "adduser",
+    "doorip": "192.168.1.50",
+    "extra": "x"
+   },
+   "problem": null,
+   "stored": {
+    "uid": "04a1b2c3",
+    "user": "Alice",
+    "pincode": "",
+    "acctype": 1,
+    "acctype2": 0,
+    "acctype3": 0,
+    "acctype4": 0,
+    "validsince": 0,
+    "validuntil": 2145916800
+   }
+  },
+  {
+   "name": "uid lower-cased",
+   "set": {
+    "uid": "04A1B2C3"
+   },
+   "problem": null,
+   "stored": {
+    "uid": "04a1b2c3",
+    "user": "Alice",
+    "pincode": "",
+    "acctype": 1,
+    "acctype2": 0,
+    "acctype3": 0,
+    "acctype4": 0,
+    "validsince": 0,
+    "validuntil": 2145916800
+   }
+  },
+  {
+   "name": "uid with a path character",
+   "set": {
+    "uid": "../config.json"
+   },
+   "problem": "Invalid uid: 1-32 letters and digits"
+  },
+  {
+   "name": "uid of 33 characters",
+   "set": {
+    "uid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "problem": "Invalid uid: 1-32 letters and digits"
+  },
+  {
+   "name": "no uid",
+   "set": {
+    "uid": null
+   },
+   "problem": "Invalid uid: 1-32 letters and digits"
+  },
+  {
+   "name": "PIN of 4 digits",
+   "set": {
+    "pincode": "4821"
+   },
+   "problem": null,
+   "stored": {
+    "uid": "04a1b2c3",
+    "user": "Alice",
+    "pincode": "4821",
+    "acctype": 1,
+    "acctype2": 0,
+    "acctype3": 0,
+    "acctype4": 0,
+    "validsince": 0,
+    "validuntil": 2145916800
+   }
+  },
+  {
+   "name": "PIN of 12 digits",
+   "set": {
+    "pincode": "123456789012"
+   },
+   "problem": null,
+   "stored": {
+    "uid": "04a1b2c3",
+    "user": "Alice",
+    "pincode": "123456789012",
+    "acctype": 1,
+    "acctype2": 0,
+    "acctype3": 0,
+    "acctype4": 0,
+    "validsince": 0,
+    "validuntil": 2145916800
+   }
+  },
+  {
+   "name": "PIN of 3 digits",
+   "set": {
+    "pincode": "482"
+   },
+   "problem": "PIN must be 4-12 digits"
+  },
+  {
+   "name": "PIN of 13 digits",
+   "set": {
+    "pincode": "1234567890123"
+   },
+   "problem": "PIN must be 4-12 digits"
+  },
+  {
+   "name": "PIN with a letter",
+   "set": {
+    "pincode": "48a1"
+   },
+   "problem": "PIN must be 4-12 digits"
+  },
+  {
+   "name": "PIN as a number (leading zeros would be lost)",
+   "set": {
+    "pincode": 4821
+   },
+   "problem": "PIN must be 4-12 digits"
+  },
+  {
+   "name": "PIN-only user: the uid is the PIN",
+   "set": {
+    "uid": "7395",
+    "pincode": "7395"
+   },
+   "problem": null,
+   "stored": {
+    "uid": "7395",
+    "user": "Alice",
+    "pincode": "7395",
+    "acctype": 1,
+    "acctype2": 0,
+    "acctype3": 0,
+    "acctype4": 0,
+    "validsince": 0,
+    "validuntil": 2145916800
+   }
+  },
+  {
+   "name": "access 99 (admin)",
+   "set": {
+    "acctype": 99
+   },
+   "problem": null,
+   "stored": {
+    "uid": "04a1b2c3",
+    "user": "Alice",
+    "pincode": "",
+    "acctype": 99,
+    "acctype2": 0,
+    "acctype3": 0,
+    "acctype4": 0,
+    "validsince": 0,
+    "validuntil": 2145916800
+   }
+  },
+  {
+   "name": "access as strings (README adduser example)",
+   "set": {
+    "acctype": "1",
+    "validsince": "0",
+    "validuntil": "1608466200"
+   },
+   "problem": null,
+   "stored": {
+    "uid": "04a1b2c3",
+    "user": "Alice",
+    "pincode": "",
+    "acctype": 1,
+    "acctype2": 0,
+    "acctype3": 0,
+    "acctype4": 0,
+    "validsince": 0,
+    "validuntil": 1608466200
+   }
+  },
+  {
+   "name": "access 2 refused",
+   "set": {
+    "acctype": 2
+   },
+   "problem": "Access must be 0 (disabled), 1 (always) or 99 (admin)"
+  },
+  {
+   "name": "door 2 access 5 refused",
+   "set": {
+    "acctype2": 5
+   },
+   "problem": "Access must be 0 (disabled), 1 (always) or 99 (admin)"
+  },
+  {
+   "name": "door 4 access missing: disabled",
+   "set": {
+    "acctype4": null
+   },
+   "problem": null,
+   "stored": {
+    "uid": "04a1b2c3",
+    "user": "Alice",
+    "pincode": "",
+    "acctype": 1,
+    "acctype2": 0,
+    "acctype3": 0,
+    "acctype4": 0,
+    "validsince": 0,
+    "validuntil": 2145916800
+   }
+  },
+  {
+   "name": "access as text refused",
+   "set": {
+    "acctype": "always"
+   },
+   "problem": "Access must be 0 (disabled), 1 (always) or 99 (admin)"
+  },
+  {
+   "name": "valid since before 1970 (the editor east of UTC) is 0",
+   "set": {
+    "validsince": -3600
+   },
+   "problem": null,
+   "stored": {
+    "uid": "04a1b2c3",
+    "user": "Alice",
+    "pincode": "",
+    "acctype": 1,
+    "acctype2": 0,
+    "acctype3": 0,
+    "acctype4": 0,
+    "validsince": 0,
+    "validuntil": 2145916800
+   }
+  },
+  {
+   "name": "valid until missing",
+   "set": {
+    "validuntil": null
+   },
+   "problem": "Valid until is required"
+  },
+  {
+   "name": "valid until as text",
+   "set": {
+    "validuntil": "2038-01-01"
+   },
+   "problem": "Valid until must be a date (Unix time)"
+  },
+  {
+   "name": "valid since as text",
+   "set": {
+    "validsince": "soon"
+   },
+   "problem": "Valid since must be a date (Unix time)"
+  },
+  {
+   "name": "valid until past 2106",
+   "set": {
+    "validuntil": 4294967296
+   },
+   "problem": "Valid until must be a date (Unix time)"
+  },
+  {
+   "name": "user name of 64 bytes",
+   "set": {
+    "user": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   },
+   "problem": null,
+   "stored": {
+    "uid": "04a1b2c3",
+    "user": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "pincode": "",
+    "acctype": 1,
+    "acctype2": 0,
+    "acctype3": 0,
+    "acctype4": 0,
+    "validsince": 0,
+    "validuntil": 2145916800
+   }
+  },
+  {
+   "name": "user name of 65 bytes",
+   "set": {
+    "user": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   },
+   "problem": "User name is too long (at most 32 characters; 64 bytes)"
+  },
+  {
+   "name": "user name of 33 accented letters (66 bytes)",
+   "set": {
+    "user": "ééééééééééééééééééééééééééééééééé"
+   },
+   "problem": "User name is too long (at most 32 characters; 64 bytes)"
+  },
+  {
+   "name": "user name as a number",
+   "set": {
+    "user": 12
+   },
+   "problem": "User name must be text"
+  },
+  {
+   "name": "no user name",
+   "set": {
+    "user": null
+   },
+   "problem": null,
+   "stored": {
+    "uid": "04a1b2c3",
+    "user": "",
+    "pincode": "",
+    "acctype": 1,
+    "acctype2": 0,
+    "acctype3": 0,
+    "acctype4": 0,
+    "validsince": 0,
+    "validuntil": 2145916800
+   }
+  },
+  {
+   "name": "replaces (a changed UID in the editor) is not stored",
+   "set": {
+    "replaces": "0BADC0DE"
+   },
+   "problem": null,
+   "stored": {
+    "uid": "04a1b2c3",
+    "user": "Alice",
+    "pincode": "",
+    "acctype": 1,
+    "acctype2": 0,
+    "acctype3": 0,
+    "acctype4": 0,
+    "validsince": 0,
+    "validuntil": 2145916800
+   }
+  },
+  {
+   "name": "replaces with a path character",
+   "set": {
+    "replaces": "../config.json"
+   },
+   "problem": "Invalid uid to replace"
+  },
+  {
+   "name": "replaces that is not text",
+   "set": {
+    "replaces": 7
+   },
+   "problem": "Invalid uid to replace"
+  }
+ ]
+}

@@ -1,0 +1,52 @@
+<template id="logcontent">
+<div class="logpage">
+    <div class="pagehead">
+        <h1>Access Log</h1>
+        <p>Every card and PIN shown at a reader, and whether the door opened.</p>
+    </div>
+    <div id="latestfilebanner" class="banner info" hidden>
+        <svg class="icon"><use href="#i-file"/></svg>
+        <div>You are looking at the file <code id="latestfilename"></code>, not the current log.
+            <a href="#" data-onclick="showCurrentLog">Show the current log</a></div>
+    </div>
+    <section class="card flush logcard" id="latestcard">
+        <div class="logtools">
+            <div class="toolbar">
+                <label class="search">
+                    <svg class="icon"><use href="#i-search"/></svg>
+                    <input type="search" id="latestsearch" placeholder="Search name, UID, door, date" aria-label="Search the access log" autocomplete="off" spellcheck="false" data-oninput="logSearch" data-arg="value">
+                </label>
+                <button type="button" class="btn small" id="latestorder" data-onclick="logToggleOrder" title="Change the order"><svg class="icon icon-sm"><use href="#i-clock"/></svg><span id="latestordertext">Newest first</span></button>
+                <button type="button" class="iconbtn" data-onclick="reloadLog" aria-label="Reload the log" title="Reload"><svg class="icon"><use href="#i-rotate"/></svg></button>
+            </div>
+            <div class="segmented logfilter" role="radiogroup" aria-label="Show">
+                <label><input type="radio" name="latestkind" value="all" checked data-onchange="logFilter" data-arg="value">All <span class="count" id="latestcount-all"></span></label>
+                <label><input type="radio" name="latestkind" value="granted" data-onchange="logFilter" data-arg="value">Granted <span class="count" id="latestcount-granted"></span></label>
+                <label><input type="radio" name="latestkind" value="denied" data-onchange="logFilter" data-arg="value">Denied <span class="count" id="latestcount-denied"></span></label>
+            </div>
+            <div class="logsummary muted small" id="latestsummary" aria-live="polite"></div>
+        </div>
+        <div id="loading-img" class="loading" role="status">
+            <span class="spinner" aria-hidden="true"></span><span id="loadpages">Loading the log&hellip;</span>
+        </div>
+        <div class="tablewrap">
+            <table id="latestlogtable" class="data logtable accesslog" hidden></table>
+        </div>
+        <div id="latestempty" class="empty" hidden>
+            <p id="latestemptytext"></p>
+            <button type="button" id="latestemptyclear" class="btn small" data-onclick="logClearSearch">Clear search and filter</button>
+        </div>
+        <div class="pager" id="latestpager" hidden>
+            <button type="button" class="btn small" id="latestprev" data-onclick="logPage" data-arg="prev"><svg class="icon icon-sm flip"><use href="#i-chevron"/></svg>Previous</button>
+            <span id="latestpagetext"></span>
+            <button type="button" class="btn small" id="latestnext" data-onclick="logPage" data-arg="next">Next<svg class="icon icon-sm"><use href="#i-chevron"/></svg></button>
+        </div>
+    </section>
+    <div class="actions logactions">
+        <span class="muted small" id="latestcleartip"></span>
+        <button type="button" id="clearlatestlogbtn" disabled class="btn danger" data-onclick="clearlatest"><svg class="icon icon-sm"><use href="#i-trash"/></svg>Clear log</button>
+        <button type="button" id="savelatestlogbtn" disabled class="btn primary" data-onclick="savelatest"><svg class="icon icon-sm"><use href="#i-download"/></svg>Download</button>
+        <a id="downloadLatest" hidden></a>
+    </div>
+</div>
+</template>

@@ -1,0 +1,82 @@
+{
+ "network": {
+  "wmode": 0,
+  "ssid": "site-wifi",
+  "pswd": "",
+  "dhcp": 1
+ },
+ "hardware": {
+  "readertype": 1,
+  "wgd0pin": 34,
+  "wgd1pin": 35,
+  "removeparitybits": 1,
+  "useridstoragemode": "decimal",
+  "numrelays": 2,
+  "rpin": 16,
+  "rtype": 1,
+  "ltype": 0,
+  "rtime": 3000,
+  "doorname": "Door 1",
+  "doorstatpin": 255,
+  "openlockpin": 13,
+  "relay2": {
+   "rtype": 1,
+   "rhold": 1,
+   "ltype": 0,
+   "rpin": 17,
+   "rtime": 3000,
+   "doorname": "Door 2",
+   "doorstatpin": 255,
+   "openlockpin": 4
+  },
+  "reader1": {
+   "door": 0,
+   "ledpin": 25,
+   "beeperpin": 26,
+   "feedbackactivehigh": 1
+  },
+  "reader2": {
+   "enabled": 1,
+   "wgd0pin": 32,
+   "wgd1pin": 33,
+   "door": 1,
+   "ledpin": 27,
+   "beeperpin": 14,
+   "feedbackactivehigh": 1
+  },
+  "wifipin": 255,
+  "doorbellpin": 255,
+  "accessdeniedpin": 255,
+  "beeperpin": 255,
+  "ledwaitingpin": 255,
+  "maxOpenDoorTime": 0
+ },
+ "general": {
+  "hostnm": "ironframe-rfid",
+  "pswd": "Site-Door-2026",
+  "restart": 0,
+  "logging": 1,
+  "openinghours": [
+   "111111111111111111111111",
+   "111111111111111111111111",
+   "111111111111111111111111",
+   "111111111111111111111111",
+   "111111111111111111111111",
+   "111111111111111111111111",
+   "111111111111111111111111"
+  ]
+ },
+ "mqtt": {
+  "enabled": 0
+ },
+ "ntp": {
+  "server": "pool.ntp.org",
+  "interval": 30,
+  "tzinfo": "GMT0BST,M3.5.0/1,M10.5.0",
+  "rtc": {
+   "type": 1,
+   "sdapin": 21,
+   "sclpin": 22
+  }
+ }
+}

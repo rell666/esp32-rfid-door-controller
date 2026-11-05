@@ -1,0 +1,269 @@
+// Loading the settings: core::parseSettings (core/settings.h) reads
+// config.json, refusing unsafe pins, access points and opening hours; this
+// file applies the result to the hardware.
+
+static core::PolicyBoard policyBoard(); // websocket.esp
+void setupDoors();                     // door.esp
+void setupDoorbell();                  // doorbell.esp
+
+// NVS copies of the relay pins and their locked levels (core::packRelayBoot)
+// and of each door's exit button with its relay (core::packExitBoot),
+// rewritten only when they change.
+static void storeRelayBootOf(const Config &c)
+{
+	uint8_t packed[core::RELAY_BOOT_MAX * core::EXIT_BOOT_ENTRY];
+	size_t len = core::packRelayBoot(core::relayBankOf(c), packed);
+	storeBootBytes("relayboot", packed, len);
+	len = core::packExitBoot(core::relayBankOf(c), c.exitPin, packed);
+	storeBootBytes("exitboot", packed, len);
+}
+
+static void storeRelayBoot()
+{
+	storeRelayBootOf(config);
+}
+
+// After a settings save, before the restart: store the locked levels and exit
+// buttons of the NEW relay settings. Until now the NVS copy kept the running
+// ones until the restart had read the new file, so a changed Relay Type made
+// lockRelaysAtBoot() drive the new unlocked level from power-up until the
+// settings were loaded.
+void storeRelayBootFrom(JsonDocument &doc)
+{
+	static Config next; // static: ~1.5 KB, off the loop() stack
+	if (core::parseSettings(doc.as<JsonObjectConst>(), policyBoard(), next).problem != nullptr)
+		return; // the restart refuses these settings and keeps the relays as they are
+	storeRelayBootOf(next);
+}
+
+// A settings save that changes live settings only (core/livesettings.h) is
+// applied without a restart. handleConfigFile() runs on the loop() task
+// (processWsQueue) and only queues it here; liveSettingsLoop(), also in
+// loop(), copies the live fields into config between two reader passes, and
+// only while no reader is part-way through a PIN (a card swiped under "PIN
+// required" must not open on the card alone because the rule changed under
+// it). Everything stays on one task: no ISR or timer callback reads a live
+// field (the relock esp_timer reads only relay pins and levels).
+static Config liveNext;               // static: ~1.5 KB, off the loop() stack; the parse of the saved file
+static bool liveApplyPending = false; // loop() task only
+static String liveWhat;               // the changed keys, for the event log
+
+// True: the saved document was parsed and will be applied by
+// liveSettingsLoop(). False (the file is refused at load): restart instead.
+bool queueLiveSettings(JsonDocument &doc, const String &what)
+{
+	core::SettingsLoad load = core::parseSettings(doc.as<JsonObjectConst>(), policyBoard(), liveNext);
+	if (load.problem != nullptr)
+		return false;
+	for (const std::string &w : load.warnings)
+		writeEvent("WARN", "sys", w.c_str(), "");
+	liveApplyPending = true;
+	liveWhat = what;
+	return true;
+}
+
+// A saved document waits for liveSettingsLoop() (main.cpp: no restart meanwhile).
+bool liveSettingsPending()
+{
+	return liveApplyPending;
+}
+
+// setlogging while a live apply waits: the queued copy must not undo it.
+void liveSettingsLogging(bool on)
+{
+	if (liveApplyPending)
+		liveNext.loggingEnabled = on;
+}
+
+void liveSettingsLoop()
+{
+	if (!liveApplyPending || anyReaderWaitingForPin())
+		return;
+	liveApplyPending = false;
+	bool tzChanged = strcmp(config.tzInfo, liveNext.tzInfo) != 0;
+	core::copyLiveSettings(liveNext, config);
+	if (tzChanged)
+	{
+		setenv("TZ", config.tzInfo, 1);
+		tzset();
+		localtime_r(&deviceClock.epoch, &deviceClock.local); // opening hours use it at once
+	}
+	// door names and the door-control lock entities are in the discovery
+	if (config.mqttEnabled && config.mqttHA && mqttClient.connected())
+		mqttPublishDiscovery();
+	writeEvent("INFO", "sys", "Settings applied without a restart", liveWhat);
+	liveWhat = String();
+}
+
+// What lockRelaysAtBoot() drove, for logBootRelays() (it runs before Serial).
+static core::RelayBootEntry bootRelays[core::RELAY_BOOT_MAX];
+static size_t bootRelayCount = 0;
+
+// First thing in setup(): drive the relays of the last loaded configuration
+// to their locked level, before the filesystem is touched.
+void lockRelaysAtBoot()
+{
+	uint8_t stored[core::RELAY_BOOT_MAX * 2];
+	size_t len = loadBootBytes("relayboot", stored, sizeof(stored));
+	core::RelayBootEntry *e = bootRelays;
+	size_t n = bootRelayCount = core::unpackRelayBoot(stored, len, boardPins(), e);
+	for (size_t i = 0; i < n; i++)
+	{
+		digitalWrite(e[i].pin, e[i].idle); // level first: no glitch on active-low relays
+		pinMode(e[i].pin, OUTPUT);
+		digitalWrite(e[i].pin, e[i].idle);
+	}
+}
+
+#ifdef DEBUG
+// Asserted by the configured-device boot test (test/qemu/boot-test.sh).
+void logBootRelays()
+{
+	for (size_t i = 0; i < bootRelayCount; i++)
+		Serial.printf("[ INFO ] Relay GPIO %u driven locked (%s) from NVS\n", bootRelays[i].pin, bootRelays[i].idle ? "HIGH" : "LOW");
+}
+#endif
+
+// Pin modes, readers, relays, clock and MQTT topic for the loaded settings.
+// An output at its off level: the level is written before pinMode(OUTPUT),
+// which alone drives LOW, the ON level of these active-low LEDs and beeper.
+static void outputOff(uint8_t pin, uint8_t off)
+{
+	if (pin == 255)
+		return;
+	digitalWrite(pin, off);
+	pinMode(pin, OUTPUT);
+	digitalWrite(pin, off);
+}
+
+static void applySettings()
+{
+	outputOff(config.wifipin, LEDoff);
+	if (config.doorbellpin != 255)
+		setupDoorbell();
+	// off: writing LOW (LEDon) here lit the denied LED from boot
+	// until the first loop() pass
+	outputOff(config.accessdeniedpin, LEDoff);
+	outputOff(config.beeperpin, BEEPERoff);
+	outputOff(config.ledwaitingpin, LEDoff);
+
+#ifdef DEBUG
+	Serial.println(F("[ INFO ] Starting the readers"));
+#endif
+	for (int i = 0; i < MAX_READERS; i++)
+		rfidReaders[i].index = i;
+	// reader 1: off when its stored type is no longer supported (parseSettings warned)
+	if (config.readertype == READER_WIEGAND && config.readers[0].d0 != 255 && config.readers[0].d1 != 255)
+		setupWiegandReader(0, config.readers[0].d0, config.readers[0].d1);
+	// reader 2: parseSettings set its pins only when it is enabled
+	if (config.readers[1].d0 != 255 && config.readers[1].d1 != 255)
+		setupWiegandReader(1, config.readers[1].d0, config.readers[1].d1);
+
+	// the sync interval is set before SNTP starts (configTime): read at start only
+	if (uint32_t ms = core::ntpSyncIntervalMs(config.ntpInterval))
+		sntp_set_sync_interval(ms);
+	configTime(0, 0, config.ntpServer);
+	// time zone codes: https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv
+	setenv("TZ", config.tzInfo, 1);
+	tzset(); // ESP32 newlib only applies TZ after tzset()
+
+	setupDoors(); // door.esp: contacts and exit buttons
+
+	for (int i = 0; i < config.numRelays; i++)
+	{
+		if (config.relayPin[i] == 255)
+			continue;
+		// locked: not the unlock level (relay on while locked for a door set to Locked)
+		digitalWrite(config.relayPin[i], !config.relayUnlock[i]); // idle level first: no glitch on active-low relays
+		pinMode(config.relayPin[i], OUTPUT);
+		digitalWrite(config.relayPin[i], !config.relayUnlock[i]);
+	}
+#ifdef DEBUG
+	// what actually started, asserted by the configured-device boot test (test/qemu/boot-test.sh)
+	for (int i = 0; i < MAX_READERS; i++)
+		if (rfidReaders[i].wiegandPort >= 0)
+			Serial.printf("[ INFO ] Reader %d: Wiegand D0 %u D1 %u started\n", i + 1, config.readers[i].d0, config.readers[i].d1);
+	for (int i = 0; i < config.numRelays; i++)
+		Serial.printf("[ INFO ] Door %d: relay GPIO %u, exit button GPIO %u\n", i + 1, config.relayPin[i], config.exitPin[i]);
+	for (int i = 0; i < config.numRelays; i++)
+		if (config.relayPin[i] != 255)
+			Serial.printf("[ INFO ] Relay GPIO %u locked (%s), relay %s while locked\n", config.relayPin[i],
+						  config.relayUnlock[i] ? "LOW" : "HIGH", config.relayHold[i] ? "on" : "off");
+#endif
+
+	if (config.mqttEnabled && config.mqttAutoTopic)
+	{
+		// read from eFuse: WiFi is not started yet, and softAPmacAddress()
+		// then returns the buffer untouched (stack garbage in the topic)
+		uint8_t macAddr[6] = {0};
+		esp_read_mac(macAddr, ESP_MAC_WIFI_SOFTAP);
+		size_t len = strlen(config.mqttTopic);
+		snprintf(config.mqttTopic + len, sizeof(config.mqttTopic) - len, "-%02x%02x%02x", macAddr[3], macAddr[4], macAddr[5]);
+	}
+}
+
+bool loadConfiguration()
+{
+	bool configArtifactsPresent = LittleFS.exists("/config.json") || LittleFS.exists("/config.json.bak");
+	DynamicJsonDocument json(8192);
+	if (!readJsonFileRecover("/config.json", json))
+	{
+		configDamaged = commissionedState() || configArtifactsPresent;
+#ifdef DEBUG
+		Serial.println(F("[ WARN ] Missing or invalid config file"));
+#endif
+		return false;
+	}
+	static Config parsed; // static: ~1.5 KB, kept off the setup() stack
+	core::SettingsLoad load = core::parseSettings(json.as<JsonObjectConst>(), policyBoard(), parsed);
+	for (const std::string &w : load.warnings)
+		writeEvent("WARN", "sys", w.c_str(), "");
+	if (load.problem != nullptr)
+	{
+		configDamaged = true;
+		writeEvent("ERRO", "sys", load.problem, "");
+		return false;
+	}
+	config = parsed;
+	if (load.passwordMigrated || load.wifiTimeoutMigrated)
+	{
+		// The admin password stored in clear before 1.4.2: replaced with its
+		// hash, once. The write keeps the old file as config.json.bak, which
+		// still holds the password in clear: removed (the new file was read
+		// back and checked; the next settings save makes a .bak again).
+		if (load.passwordMigrated)
+			core::putAdminPassword(json["general"], config.adminHa1, config.adminMustChange);
+		// WiFi Timeout (until 1.7) replaced by idle-off (core/wifiidle.h), once
+		if (load.wifiTimeoutMigrated)
+			core::putWifiIdle(json["network"].as<JsonObject>(), config);
+		// the first write after mounting scans the filesystem for free blocks,
+		// which can outlast the loop watchdog (it did in QEMU)
+		disableLoopWDT();
+		bool rewritten = writeJsonFileAtomic("/config.json", json);
+		if (rewritten && load.passwordMigrated)
+			LittleFS.remove("/config.json.bak");
+		enableLoopWDT();
+		if (load.passwordMigrated)
+		{
+			if (rewritten)
+				writeEvent("INFO", "sys", "Admin password now stored as a digest hash", config.adminMustChange ? "factory or too-short password: it must be changed" : "");
+			else
+				writeEvent("ERRO", "sys", "Could not rewrite the admin password as a digest hash", "kept in clear; tried again at the next start");
+		}
+		if (load.wifiTimeoutMigrated && load.migratedOfftime > 0)
+		{
+			String was = "WiFi Timeout was " + String(load.migratedOfftime) + " s: now ticked, " + String(config.wifiIdleMinutes) + " min";
+			if (rewritten)
+				writeEvent("INFO", "wifi", "WiFi Timeout replaced by Turn Wi-Fi off when nobody is connected", was);
+			else
+				writeEvent("ERRO", "wifi", "Could not store WiFi Timeout as Turn Wi-Fi off when nobody is connected", was + "; used for now, tried again at the next start");
+		}
+	}
+	applySettings();
+#ifdef DEBUG
+	Serial.println(F("[ INFO ] Configuration done."));
+#endif
+	storeRelayBoot();
+	setCommissionedState(true); // migration for controllers commissioned before the NVS marker
+	return true;
+}

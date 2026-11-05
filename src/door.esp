@@ -1,0 +1,217 @@
+// A door's name for the log, MQTT and Status ("" for -1 or out of range).
+// Here with the doors; it was in rfid.esp (review 8 R1-2).
+const char *doorLabel(int door)
+{
+	if (door < 0 || door >= config.numRelays)
+		return "";
+	return config.doorName[door];
+}
+
+// Per door: the contact (Door Open / Closed, forced entry, open too long:
+// core::DoorMonitor) and the exit button. Upstream had one of each, for
+// door 1 only, and the button's "TODO: handle other relays".
+//
+// MQTT: door 1 keeps the upstream io/door and io/tamper topics; door n
+// (2-4) uses io/door<n> and io/tamper<n>.
+
+struct DoorIo
+{
+	Bounce contact; // debounced (50 ms): a bouncing reed contact logged bursts of Open/Closed
+	core::DoorMonitor monitor;
+};
+
+DoorIo doorIo[MAX_NUM_RELAYS];
+
+// Exit buttons: an interrupt on every edge feeds core::ExitButton, so a press
+// made while loop() is busy is still seen (core/exitbutton.h); loop() acts on
+// it. Kept in internal RAM (static, not PSRAM) for the IRAM interrupt.
+struct ExitIo
+{
+	core::ExitButton button;
+	uint8_t pin = 255;
+	bool irq = false; // the interrupt handler is registered
+	portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+};
+
+static ExitIo exitIo[MAX_NUM_RELAYS];
+// Exit buttons attached by setupExitButtonsAtBoot(), so setupDoors() does not
+// attach them a second time.
+static uint8_t bootExitPin[MAX_NUM_RELAYS] = {255, 255, 255, 255};
+
+static String doorTopic(const char *what, int door)
+{
+	return door == 0 ? String(what) : String(what) + (door + 1);
+}
+
+// Runs with the flash cache possibly off (as the Wiegand handlers): IRAM
+// only, checked by test/check-iram.py.
+static void IRAM_ATTR exitButtonIsr(void *arg)
+{
+	ExitIo *e = static_cast<ExitIo *>(arg);
+	portENTER_CRITICAL_ISR(&e->mux);
+	e->button.edge(gpio_ll_get_level(&GPIO, (gpio_num_t)e->pin) == 0, (uint64_t)esp_timer_get_time());
+	portEXIT_CRITICAL_ISR(&e->mux);
+}
+
+static void attachExitButton(int door, uint8_t pin)
+{
+	ExitIo &e = exitIo[door];
+	if (e.irq)
+	{
+		gpio_isr_handler_remove((gpio_num_t)e.pin);
+		e.irq = false;
+	}
+	pinMode(pin, INPUT_PULLUP);
+	portENTER_CRITICAL(&e.mux);
+	e.pin = pin;
+	e.button.begin(digitalRead(pin) == LOW, (uint64_t)esp_timer_get_time());
+	portEXIT_CRITICAL(&e.mux);
+	// Without the interrupt the button is still polled from loop(), as it
+	// was before (installIramGpioIsrService() logs why).
+	if (!installIramGpioIsrService())
+		return;
+	gpio_set_intr_type((gpio_num_t)pin, GPIO_INTR_ANYEDGE);
+	if (gpio_isr_handler_add((gpio_num_t)pin, exitButtonIsr, &e) == ESP_OK)
+	{
+		gpio_intr_enable((gpio_num_t)pin);
+		e.irq = true;
+	}
+}
+
+// setup(), right after lockRelaysAtBoot(): attach the exit buttons stored in
+// NVS (core::packExitBoot) and give their doors the stored relay settings.
+// setupDoors() is only reached when config.json loads, so without this a
+// damaged or refused configuration left the door locked with no electronic
+// exit. A configuration that loads replaces these settings.
+void setupExitButtonsAtBoot()
+{
+	uint8_t stored[core::RELAY_BOOT_MAX * core::EXIT_BOOT_ENTRY];
+	size_t len = loadBootBytes("exitboot", stored, sizeof(stored));
+	core::ExitBootEntry e[core::RELAY_BOOT_MAX];
+	size_t n = core::unpackExitBoot(stored, len, boardPins(), e);
+	for (size_t k = 0; k < n; k++)
+	{
+		int i = e[k].door;
+		config.relayPin[i] = e[k].relayPin;
+		// the stored level is the unlock level (rtype XOR rhold)
+		config.relayHold[i] = 0;
+		config.relayUnlock[i] = e[k].activeLevel;
+		config.lockType[i] = e[k].lockType;
+		config.activateTime[i] = e[k].holdMs;
+		config.exitPin[i] = e[k].exitPin;
+		if (config.numRelays < i + 1)
+			config.numRelays = i + 1;
+		attachExitButton(i, e[k].exitPin);
+		bootExitPin[i] = e[k].exitPin;
+	}
+}
+
+// applySettings(): attach the inputs of every configured door.
+void setupDoors()
+{
+	for (int i = 0; i < config.numRelays; i++)
+	{
+		doorIo[i].contact = Bounce();
+		doorIo[i].monitor = core::DoorMonitor();
+		if (config.doorPin[i] != 255)
+		{
+			doorIo[i].contact.attach(config.doorPin[i], INPUT_PULLUP);
+			doorIo[i].contact.interval(50);
+		}
+		if (config.exitPin[i] != 255 && config.exitPin[i] != bootExitPin[i])
+			attachExitButton(i, config.exitPin[i]);
+	}
+}
+
+// The lock is released (relay at its unlock level), or the door has no relay.
+static bool lockReleased(int door)
+{
+	int pin = config.relayPin[door];
+	return pin == 255 || digitalRead(pin) == (config.relayUnlock[door] ? HIGH : LOW);
+}
+
+#ifdef DEBUG
+// What setupExitButtonsAtBoot() attached from NVS, before Serial was
+// started; asserted by the configured-device boot test (test/qemu/boot-test.sh).
+void logBootExitButtons()
+{
+	for (int i = 0; i < MAX_NUM_RELAYS; i++)
+		if (bootExitPin[i] != 255)
+			Serial.printf("[ INFO ] Door %d: exit button GPIO %u attached from NVS (%s), relay GPIO %u\n",
+						  i + 1, bootExitPin[i], exitIo[i].irq ? "interrupt" : "polled", config.relayPin[i]);
+}
+#endif
+
+void doorStatus()
+{
+	for (int i = 0; i < config.numRelays; i++)
+	{
+		if (config.doorPin[i] == 255)
+			continue;
+		DoorIo &d = doorIo[i];
+		d.contact.update();
+		bool open = core::contactOpen(d.contact.read());
+		core::DoorUpdate u = d.monitor.update(open, lockReleased(i), currentMillis, config.maxOpenDoorTime);
+		for (int n = 0; n < u.logs; n++)
+			writeEvent(u.log[n].type, u.log[n].src, u.log[n].desc, config.numRelays > 1 ? String(doorLabel(i)) : String(""));
+		if (u.doorChanged)
+			mqttPublishIo(doorTopic("door", i), u.doorOpen ? "ON" : "OFF");
+		if (u.tamperChanged)
+			mqttPublishIo(doorTopic("tamper", i), u.tamper ? "ON" : "OFF");
+	}
+}
+
+// Each door for Status (plan 1.9 C3): its name, locked or not (the relay as
+// driven now), and, with a door contact, open or closed and a tamper alarm.
+void statusDoors(JsonArray out)
+{
+	for (int i = 0; i < config.numRelays; i++)
+	{
+		JsonObject d = out.createNestedObject();
+		d["name"] = doorLabel(i);
+		d["relay"] = config.relayPin[i] != 255;
+		d["locked"] = config.relayPin[i] != 255 && !lockReleased(i);
+		if (config.doorPin[i] != 255)
+		{
+			d["open"] = doorIo[i].monitor.open();
+			d["tamper"] = doorIo[i].monitor.tamper();
+		}
+	}
+}
+
+// Current door and tamper states, for MQTT after a (re)connect. The tamper
+// state is the live one: an alarm raised while the broker was away stays ON.
+void publishDoorStates()
+{
+	for (int i = 0; i < config.numRelays; i++)
+	{
+		if (config.doorPin[i] == 255)
+			continue;
+		mqttPublishIo(doorTopic("door", i), doorIo[i].monitor.open() ? "ON" : "OFF");
+		mqttPublishIo(doorTopic("tamper", i), doorIo[i].monitor.tamper() ? "ON" : "OFF");
+	}
+}
+
+void exitButtonLoop()
+{
+	for (int i = 0; i < config.numRelays; i++)
+	{
+		if (config.exitPin[i] == 255)
+			continue;
+		ExitIo &e = exitIo[i];
+		if (e.pin == 255)
+			continue;
+		portENTER_CRITICAL(&e.mux); // read under the lock: no edge slips in between
+		bool pressed = e.button.poll(gpio_ll_get_level(&GPIO, (gpio_num_t)e.pin) == 0, (uint64_t)esp_timer_get_time());
+		portEXIT_CRITICAL(&e.mux);
+		if (!pressed)
+			continue;
+		writeLatest(" ", "Button", core::ACC_GRANTED, ACCESS_GRANTED, config.numRelays > 1 ? i : -1);
+		mqttPublishAccess(deviceClock.epoch, "true", "Always", "Button", " ", config.numRelays > 1 ? i : -1);
+		// release only, as MQTT open: a continuous relay toggles, so a press
+		// on a door held open would lock it
+		if (relayLockedNow(i))
+			activateRelay[i] = true;
+		beeperValidAccess();
+	}
+}

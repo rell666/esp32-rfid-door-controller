@@ -1,0 +1,147 @@
+{
+ "about": "The first bytes of a /update upload: what core::checkUpdateImageHead (src/core/firmware.h) and the simulator's copy (test/e2e/device-sim.mjs) answer, word for word (plan 1.9.1 E4, review 8 R5-7). Each case is a file of len bytes, 0 except the bytes in set (offset -> value), offered to a board of chip; want is the refusal, or null for an image the board takes. Read by test/native/tests.cpp and test/e2e/run.mjs.",
+ "cases": [
+  {
+   "name": "ESP32 app image on an ESP32",
+   "chip": "esp32",
+   "len": 36,
+   "set": {
+    "0": 233,
+    "1": 5,
+    "32": 50,
+    "33": 84,
+    "34": 205,
+    "35": 171,
+    "12": 0
+   },
+   "want": null
+  },
+  {
+   "name": "ESP32-S3 app image on an ESP32-S3",
+   "chip": "esp32s3",
+   "len": 36,
+   "set": {
+    "0": 233,
+    "1": 5,
+    "32": 50,
+    "33": 84,
+    "34": 205,
+    "35": 171,
+    "12": 9
+   },
+   "want": null
+  },
+  {
+   "name": "a longer ESP32 image (the whole file is offered)",
+   "chip": "esp32",
+   "len": 4096,
+   "set": {
+    "0": 233,
+    "1": 5,
+    "32": 50,
+    "33": 84,
+    "34": 205,
+    "35": 171,
+    "12": 0
+   },
+   "want": null
+  },
+  {
+   "name": "ESP32-S3 image on an ESP32",
+   "chip": "esp32",
+   "len": 36,
+   "set": {
+    "0": 233,
+    "1": 5,
+    "32": 50,
+    "33": 84,
+    "34": 205,
+    "35": 171,
+    "12": 9
+   },
+   "want": "This image is for another chip, not the ESP32 (WROOM)"
+  },
+  {
+   "name": "ESP32 image on an ESP32-S3",
+   "chip": "esp32s3",
+   "len": 36,
+   "set": {
+    "0": 233,
+    "1": 5,
+    "32": 50,
+    "33": 84,
+    "34": 205,
+    "35": 171,
+    "12": 0
+   },
+   "want": "This image is for another chip, not the ESP32-S3"
+  },
+  {
+   "name": "ESP32-S3 full-flash image (bootloader at 0x0: 0xE9, no app magic)",
+   "chip": "esp32s3",
+   "len": 36,
+   "set": {
+    "0": 233,
+    "1": 3,
+    "12": 9
+   },
+   "want": "Not a firmware update image: it starts with a bootloader (a -full-flash image). Use ironframe-rfid-<version>.bin"
+  },
+  {
+   "name": "ESP32 full-flash image (bootloader at 0x1000: 0xFF first)",
+   "chip": "esp32",
+   "len": 36,
+   "set": {
+    "0": 255
+   },
+   "want": "Not a firmware update image (it does not start with 0xE9). A -full-flash image is for a serial flash only: use ironframe-rfid-<version>.bin"
+  },
+  {
+   "name": "a file that is not an image",
+   "chip": "esp32",
+   "len": 64,
+   "set": {
+    "0": 102,
+    "1": 97
+   },
+   "want": "Not a firmware update image (it does not start with 0xE9). A -full-flash image is for a serial flash only: use ironframe-rfid-<version>.bin"
+  },
+  {
+   "name": "35 bytes",
+   "chip": "esp32",
+   "len": 35,
+   "set": {
+    "0": 233,
+    "1": 5,
+    "32": 50,
+    "33": 84,
+    "34": 205,
+    "12": 0
+   },
+   "want": "The file is too short to be a firmware image"
+  },
+  {
+   "name": "empty",
+   "chip": "esp32s3",
+   "len": 0,
+   "set": {},
+   "want": "The file is too short to be a firmware image"
+  },
+  {
+   "name": "chip id high byte set",
+   "chip": "esp32",
+   "len": 36,
+   "set": {
+    "0": 233,
+    "1": 5,
+    "32": 50,
+    "33": 84,
+    "34": 205,
+    "35": 171,
+    "12": 0,
+    "13": 1
+   },
+   "want": "This image is for another chip, not the ESP32 (WROOM)"
+  }
+ ]
+}

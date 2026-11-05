@@ -1,0 +1,179 @@
+// Device lifecycle: OTA image confirmation, the reason for the last restart,
+// factory reset and recovery from damaged storage.
+
+// OTA rollback. The SDK is built with CONFIG_APP_ROLLBACK_ENABLE, but the
+// Arduino core marks every image valid at boot unless this returns true.
+// A new image now stays "pending verify" until confirmFirmwareLoop() has seen
+// 60 s of normal running and one served page or WebSocket, or an hour of
+// running if nobody opens the UI (core/firmware.h); if it restarts before
+// that (crash, watchdog, power cut) the bootloader goes back to the previous
+// image, and the next boot logs it (logRollback).
+extern "C" bool verifyRollbackLater() { return true; }
+
+#ifdef QEMU_NO_WIFI
+// Espressif's QEMU runs the firmware several times slower than the chip, and
+// slower still on a busy host: the 8 s loop watchdog fired in the emulated
+// second boot with nothing wrong (ledger H27.10, review 7). The emulator
+// build allows 30 s; test/qemu/boot-test.sh checks that loop() kept
+// reporting and that the app never restarted.
+static const uint32_t LOOP_WDT_SECONDS = 30;
+#else
+static const uint32_t LOOP_WDT_SECONDS = 8;
+#endif
+std::atomic<bool> servedRequest{false}; // set by the web server and WebSocket
+
+static void confirmFirmwareLoop()
+{
+	static bool done = false;
+	if (done || !core::firmwareConfirmDue(uptimeMs(), servedRequest.load()))
+		return;
+	done = true;
+	esp_ota_img_states_t state;
+	if (esp_ota_get_state_partition(esp_ota_get_running_partition(), &state) == ESP_OK &&
+		state == ESP_OTA_IMG_PENDING_VERIFY)
+	{
+		esp_ota_mark_app_valid_cancel_rollback();
+		writeEvent("INFO", "updt", "New firmware confirmed, rollback cancelled", VERSION);
+	}
+}
+
+// Why the board last restarted, for the event log and Status: brown-outs,
+// watchdog resets and crashes on a door were invisible before.
+const char *resetReason = "";
+bool crashDumpPresent = false; // a crash dump is stored in the coredump partition
+
+static const char *resetReasonText(esp_reset_reason_t r)
+{
+	switch (r)
+	{
+	case ESP_RST_POWERON: return "power on";
+	case ESP_RST_EXT: return "reset pin";
+	case ESP_RST_SW: return "restart (software)";
+	case ESP_RST_PANIC: return "crash (panic)";
+	case ESP_RST_INT_WDT: return "interrupt watchdog";
+	case ESP_RST_TASK_WDT: return "loop watchdog";
+	case ESP_RST_WDT: return "watchdog";
+	case ESP_RST_DEEPSLEEP: return "deep sleep";
+	case ESP_RST_BROWNOUT: return "brown-out (supply voltage dropped)";
+	case ESP_RST_SDIO: return "SDIO";
+	default: return "unknown";
+	}
+}
+
+// The bootloader marks an image that was rolled back as invalid. Log it once
+// per image (NVS remembers which), so a rollback is never silent.
+static void logRollback()
+{
+	const esp_partition_t *bad = esp_ota_get_last_invalid_partition();
+	esp_app_desc_t desc;
+	if (bad == nullptr || esp_ota_get_partition_description(bad, &desc) != ESP_OK)
+		return;
+	char id[17];
+	for (int i = 0; i < 8; i++)
+		snprintf(id + i * 2, 3, "%02x", desc.app_elf_sha256[i]);
+	if (noteRolledBackImage(id))
+		writeEvent("WARN", "updt", "A firmware update was rolled back: the new image did not keep running, so the previous one runs again", String("image ") + id);
+}
+
+static void logResetReason()
+{
+	esp_reset_reason_t why = esp_reset_reason();
+	resetReason = resetReasonText(why);
+	bool bad = why == ESP_RST_PANIC || why == ESP_RST_INT_WDT || why == ESP_RST_TASK_WDT || why == ESP_RST_WDT || why == ESP_RST_BROWNOUT;
+	writeEvent(bad ? "WARN" : "INFO", "sys", String("Started after: ") + resetReason, "");
+	crashDumpPresent = esp_core_dump_image_check() == ESP_OK;
+	logRollback();
+	if (crashDumpPresent)
+		writeEvent("WARN", "sys", "A crash dump is stored in flash", "read it with esptool / espcoredump over the serial header");
+}
+
+// Factory reset. A power cut in the middle of the format left a partition
+// that neither mounted nor looked blank: the board refused to format it
+// (fail secure), turned Wi-Fi off and needed a serial reflash. The flag in
+// NVS (storage.esp), set before the format starts, makes the next boot
+// finish it. Erases the settings, users and logs; the caller restarts.
+// kind: Factory (the web page) also clears the NVS exit-button boot copy;
+// Recovery (BOOT-hold's full-format fallback) keeps it. Both keep the relay
+// copy, so the relays stay driven locked from power-up.
+static void factoryReset(core::ResetKind kind)
+{
+	setFactoryResetPending(kind == core::ResetKind::Factory ? 2 : 1);
+	clearCommissioning(kind);
+	disableLoopWDT(); // erasing the partition takes longer than the watchdog
+	bool ok = LittleFS.format();
+	enableLoopWDT();
+	if (ok)
+		setFactoryResetPending(false);
+}
+
+// While the storage is damaged (configDamaged: Wi-Fi off, doors not set up
+// beyond the exit buttons stored in NVS),
+// holding BOOT (GPIO0) for RECOVERY_HOLD_MS erases the settings and restarts
+// into the setup hotspot. Only then: on a working board BOOT does nothing.
+// (Holding BOOT while powering up still enters the ROM loader, for a serial
+// flash.)
+static const uint32_t RECOVERY_HOLD_MS = 10000;
+
+// Erases the settings (config.json, its .bak and .tmp) and the commissioning
+// state, keeping the users in /P, the logs and the NVS relay and exit-button
+// boot copies. Formatting it all lost every user to a bad settings file. A
+// filesystem that does not mount (or a settings file that cannot be
+// removed) can only be formatted, users and all. The caller restarts.
+static void recoverStorage()
+{
+	if (storageMounted)
+	{
+		LittleFSAdapter fsa;
+		if (core::eraseSettingsFiles(fsa))
+		{
+			clearCommissioning(core::ResetKind::Recovery);
+			setRecoveryNote(1);
+			return;
+		}
+	}
+	setRecoveryNote(2);
+	factoryReset(core::ResetKind::Recovery);
+}
+
+static void logRecovery()
+{
+	uint8_t what = takeRecoveryNote();
+	if (what == 1)
+		writeEvent("WARN", "sys", "BOOT held: settings erased, users kept", "restore a settings backup");
+	else if (what == 2)
+		writeEvent("WARN", "sys", "BOOT held: the filesystem could not be used, so it was formatted: settings, users and logs erased", "restore both backups");
+}
+
+static void recoveryButtonLoop()
+{
+	static bool armed = false, released = false, held = false;
+	static uint64_t pressedAt = 0;
+	if (!configDamaged)
+		return;
+	if (!armed)
+	{
+		pinMode(0, INPUT_PULLUP);
+		armed = true;
+	}
+	if (digitalRead(0) != LOW)
+	{
+		released = true;
+		held = false;
+		return;
+	}
+	// a press counts only after BOOT has been seen released: a GPIO0 that
+	// reads low all the time (no pull-up, a fault, QEMU) never erases anything
+	if (!released)
+		return;
+	if (!held)
+	{
+		held = true;
+		pressedAt = uptimeMs();
+	}
+	else if (uptimeMs() - pressedAt >= RECOVERY_HOLD_MS)
+	{
+		recoverStorage();
+		ESP.restart();
+	}
+}
+

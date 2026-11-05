@@ -1,0 +1,932 @@
+{
+ "about": "Live-settings vectors (core/livesettings.h): which settings saves are applied without a restart. Each case builds before from base (with before applied, or no stored settings at all when beforeNull) and after from base with set applied (dotted path -> value; null removes the key) and expects restart. Asserted by test/native/tests.cpp against the firmware (compareSettings, and copyLiveSettings: a live save's copy equals a fresh load of it, a restart save's copy changes nothing) and by test/check-live-settings.mjs against the web UI (policy.js settingsNeedRestart) and the simulator (device-sim.mjs).",
+ "base": {
+  "command": "configfile",
+  "network": {
+   "wmode": 0,
+   "ssid": "site-wifi",
+   "pswd": "wifi-secret-123",
+   "bssid": "",
+   "hide": 0,
+   "dhcp": 1,
+   "ip": "",
+   "subnet": "",
+   "gateway": "",
+   "dns": "",
+   "apip": "192.168.4.1",
+   "apsubnet": "255.255.255.0",
+   "fallbackmode": 0,
+   "fallbackpswd": "",
+   "idleoff": 0,
+   "idlemins": 15
+  },
+  "hardware": {
+   "readertype": 1,
+   "wgd0pin": 34,
+   "wgd1pin": 35,
+   "sspin": 255,
+   "rfidgain": 32,
+   "rdm6300pin": 255,
+   "rpin": 16,
+   "rtime": 3000,
+   "rtype": 1,
+   "rhold": 0,
+   "ltype": 0,
+   "doorname": "Front",
+   "numrelays": 2,
+   "doorstatpin": 255,
+   "openlockpin": 13,
+   "relay2": {
+    "rpin": 17,
+    "rtime": 3000,
+    "rtype": 1,
+    "rhold": 0,
+    "ltype": 0,
+    "doorname": "Back",
+    "doorstatpin": 255,
+    "openlockpin": 255
+   },
+   "requirepincodeafterrfid": 0,
+   "allowpincodeonly": 0,
+   "useridstoragemode": "hexadecimal",
+   "removeparitybits": 1,
+   "reader1": {
+    "door": 0,
+    "ledpin": 25,
+    "beeperpin": 26,
+    "feedbackactivehigh": 1,
+    "direction": 0
+   },
+   "reader2": {
+    "enabled": 1,
+    "wgd0pin": 32,
+    "wgd1pin": 33,
+    "door": 1,
+    "ledpin": 27,
+    "beeperpin": 14,
+    "feedbackactivehigh": 1,
+    "direction": 0
+   },
+   "wifipin": 255,
+   "doorbellpin": 255,
+   "accessdeniedpin": 255,
+   "beeperpin": 255,
+   "ledwaitingpin": 255,
+   "maxOpenDoorTime": 0
+  },
+  "general": {
+   "hostnm": "ironframe-rfid",
+   "restart": 0,
+   "logging": 1,
+   "pswd": "55660a03a22f4e179a972642deb67353",
+   "pswdhash": 1,
+   "openinghours": [
+    "111111111111111111111111",
+    "111111111111111111111111",
+    "111111111111111111111111",
+    "111111111111111111111111",
+    "111111111111111111111111",
+    "111111111111111111111111",
+    "111111111111111111111111"
+   ]
+  },
+  "mqtt": {
+   "enabled": 1,
+   "host": "broker.local",
+   "port": 1883,
+   "user": "door",
+   "pswd": "mqtt-secret-456",
+   "topic": "site/door",
+   "autotopic": 0,
+   "syncrate": 180,
+   "mqttlog": 0,
+   "mqttha": 0,
+   "remoteadmin": 0,
+   "doorcontrol": 0,
+   "carduid": 1
+  },
+  "ntp": {
+   "server": "pool.ntp.org",
+   "interval": 30,
+   "tzinfo": "",
+   "rtc": {
+    "type": 0,
+    "sdapin": 21,
+    "sclpin": 22
+   }
+  }
+ },
+ "cases": [
+  {
+   "name": "no change",
+   "set": {},
+   "restart": false
+  },
+  {
+   "name": "live: hardware.rtime",
+   "set": {
+    "hardware.rtime": 5000
+   },
+   "restart": false
+  },
+  {
+   "name": "live: hardware.relay2.rtime",
+   "set": {
+    "hardware.relay2.rtime": 4000
+   },
+   "restart": false
+  },
+  {
+   "name": "live: hardware.relay3.rtime",
+   "set": {
+    "hardware.relay3.rtime": 2000
+   },
+   "restart": false
+  },
+  {
+   "name": "live: hardware.relay4.rtime",
+   "set": {
+    "hardware.relay4.rtime": 2000
+   },
+   "restart": false
+  },
+  {
+   "name": "live: hardware.doorname",
+   "set": {
+    "hardware.doorname": "Main entrance"
+   },
+   "restart": false
+  },
+  {
+   "name": "live: hardware.relay2.doorname",
+   "set": {
+    "hardware.relay2.doorname": "Yard gate"
+   },
+   "restart": false
+  },
+  {
+   "name": "live: hardware.relay3.doorname",
+   "set": {
+    "hardware.relay3.doorname": "Store"
+   },
+   "restart": false
+  },
+  {
+   "name": "live: hardware.relay4.doorname",
+   "set": {
+    "hardware.relay4.doorname": "Office"
+   },
+   "restart": false
+  },
+  {
+   "name": "live: hardware.maxOpenDoorTime",
+   "set": {
+    "hardware.maxOpenDoorTime": 120
+   },
+   "restart": false
+  },
+  {
+   "name": "live: hardware.requirepincodeafterrfid",
+   "set": {
+    "hardware.requirepincodeafterrfid": 1
+   },
+   "restart": false
+  },
+  {
+   "name": "live: hardware.allowpincodeonly",
+   "set": {
+    "hardware.allowpincodeonly": 1
+   },
+   "restart": false
+  },
+  {
+   "name": "live: hardware.useridstoragemode",
+   "set": {
+    "hardware.useridstoragemode": "decimal"
+   },
+   "restart": false
+  },
+  {
+   "name": "live: hardware.removeparitybits",
+   "set": {
+    "hardware.removeparitybits": 0
+   },
+   "restart": false
+  },
+  {
+   "name": "live: hardware.reader1.door",
+   "set": {
+    "hardware.reader1.door": 1
+   },
+   "restart": false
+  },
+  {
+   "name": "live: hardware.reader1.direction",
+   "set": {
+    "hardware.reader1.direction": 1
+   },
+   "restart": false
+  },
+  {
+   "name": "live: hardware.reader2.door",
+   "set": {
+    "hardware.reader2.door": 0
+   },
+   "restart": false
+  },
+  {
+   "name": "live: hardware.reader2.direction",
+   "set": {
+    "hardware.reader2.direction": 2
+   },
+   "restart": false
+  },
+  {
+   "name": "live: general.openinghours",
+   "set": {
+    "general.openinghours": [
+     "000000001111111111000000",
+     "111111111111111111111111",
+     "111111111111111111111111",
+     "111111111111111111111111",
+     "111111111111111111111111",
+     "111111111111111111111111",
+     "111111111111111111111111"
+    ]
+   },
+   "restart": false
+  },
+  {
+   "name": "live: general.logging",
+   "set": {
+    "general.logging": 0
+   },
+   "restart": false
+  },
+  {
+   "name": "live: ntp.tzinfo",
+   "set": {
+    "ntp.tzinfo": "GMT0BST,M3.5.0/1,M10.5.0"
+   },
+   "restart": false
+  },
+  {
+   "name": "live: mqtt.syncrate",
+   "set": {
+    "mqtt.syncrate": 60
+   },
+   "restart": false
+  },
+  {
+   "name": "live: mqtt.mqttlog",
+   "set": {
+    "mqtt.mqttlog": 1
+   },
+   "restart": false
+  },
+  {
+   "name": "live: mqtt.remoteadmin",
+   "set": {
+    "mqtt.remoteadmin": 1
+   },
+   "restart": false
+  },
+  {
+   "name": "live: mqtt.doorcontrol",
+   "set": {
+    "mqtt.doorcontrol": 1
+   },
+   "restart": false
+  },
+  {
+   "name": "live: mqtt.carduid",
+   "set": {
+    "mqtt.carduid": 2
+   },
+   "restart": false
+  },
+  {
+   "name": "live: network.idleoff",
+   "set": {
+    "network.idleoff": 1
+   },
+   "restart": false
+  },
+  {
+   "name": "live: network.idlemins",
+   "set": {
+    "network.idlemins": 30
+   },
+   "restart": false
+  },
+  {
+   "name": "restart: network.wmode",
+   "set": {
+    "network.wmode": 1
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: network.ssid",
+   "set": {
+    "network.ssid": "site-wifi-x"
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: network.pswd",
+   "set": {
+    "network.pswd": "another-secret-789"
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: network.bssid",
+   "set": {
+    "network.bssid": "aa:bb:cc:dd:ee:ff"
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: network.hide",
+   "set": {
+    "network.hide": 1
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: network.dhcp",
+   "set": {
+    "network.dhcp": 0
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: network.ip",
+   "set": {
+    "network.ip": "192.168.1.50"
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: network.subnet",
+   "set": {
+    "network.subnet": "255.255.255.0"
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: network.gateway",
+   "set": {
+    "network.gateway": "192.168.1.1"
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: network.dns",
+   "set": {
+    "network.dns": "192.168.1.1"
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: network.apip",
+   "set": {
+    "network.apip": "192.168.5.1"
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: network.apsubnet",
+   "set": {
+    "network.apsubnet": "255.255.0.0"
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: network.fallbackmode",
+   "set": {
+    "network.fallbackmode": 1
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: network.fallbackpswd",
+   "set": {
+    "network.fallbackpswd": "fallback-pass-1"
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.readertype",
+   "set": {
+    "hardware.readertype": 5
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.wgd0pin",
+   "set": {
+    "hardware.wgd0pin": 255
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.wgd1pin",
+   "set": {
+    "hardware.wgd1pin": 255
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.sspin",
+   "set": {
+    "hardware.sspin": 4
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.rfidgain",
+   "set": {
+    "hardware.rfidgain": 64
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.rdm6300pin",
+   "set": {
+    "hardware.rdm6300pin": 4
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.rpin",
+   "set": {
+    "hardware.rpin": 255
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.rtype",
+   "set": {
+    "hardware.rtype": 0
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.rhold",
+   "set": {
+    "hardware.rhold": 1
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.ltype",
+   "set": {
+    "hardware.ltype": 1
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.numrelays",
+   "set": {
+    "hardware.numrelays": 1
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.doorstatpin",
+   "set": {
+    "hardware.doorstatpin": 4
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.openlockpin",
+   "set": {
+    "hardware.openlockpin": 255
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.relay2.rpin",
+   "set": {
+    "hardware.relay2.rpin": 255
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.relay2.rtype",
+   "set": {
+    "hardware.relay2.rtype": 0
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.relay2.rhold",
+   "set": {
+    "hardware.relay2.rhold": 1
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.relay2.ltype",
+   "set": {
+    "hardware.relay2.ltype": 1
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.relay2.doorstatpin",
+   "set": {
+    "hardware.relay2.doorstatpin": 4
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.relay2.openlockpin",
+   "set": {
+    "hardware.relay2.openlockpin": 4
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.reader1.ledpin",
+   "set": {
+    "hardware.reader1.ledpin": 255
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.reader1.beeperpin",
+   "set": {
+    "hardware.reader1.beeperpin": 255
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.reader1.feedbackactivehigh",
+   "set": {
+    "hardware.reader1.feedbackactivehigh": 0
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.reader2.enabled",
+   "set": {
+    "hardware.reader2.enabled": 0
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.reader2.wgd0pin",
+   "set": {
+    "hardware.reader2.wgd0pin": 255
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.reader2.wgd1pin",
+   "set": {
+    "hardware.reader2.wgd1pin": 255
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.reader2.ledpin",
+   "set": {
+    "hardware.reader2.ledpin": 255
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.reader2.beeperpin",
+   "set": {
+    "hardware.reader2.beeperpin": 255
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.reader2.feedbackactivehigh",
+   "set": {
+    "hardware.reader2.feedbackactivehigh": 0
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.wifipin",
+   "set": {
+    "hardware.wifipin": 4
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.doorbellpin",
+   "set": {
+    "hardware.doorbellpin": 4
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.accessdeniedpin",
+   "set": {
+    "hardware.accessdeniedpin": 4
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.beeperpin",
+   "set": {
+    "hardware.beeperpin": 4
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: hardware.ledwaitingpin",
+   "set": {
+    "hardware.ledwaitingpin": 4
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: general.hostnm",
+   "set": {
+    "general.hostnm": "ironframe-rfid-x"
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: general.restart",
+   "set": {
+    "general.restart": 86400
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: general.pswd",
+   "set": {
+    "general.pswd": "another-secret-789"
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: general.pswdhash",
+   "set": {
+    "general.pswdhash": 0
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: mqtt.enabled",
+   "set": {
+    "mqtt.enabled": 0
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: mqtt.host",
+   "set": {
+    "mqtt.host": "broker.local-x"
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: mqtt.port",
+   "set": {
+    "mqtt.port": 8883
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: mqtt.user",
+   "set": {
+    "mqtt.user": "door-x"
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: mqtt.pswd",
+   "set": {
+    "mqtt.pswd": "another-secret-789"
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: mqtt.topic",
+   "set": {
+    "mqtt.topic": "site/door-x"
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: mqtt.autotopic",
+   "set": {
+    "mqtt.autotopic": 1
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: mqtt.mqttha",
+   "set": {
+    "mqtt.mqttha": 1
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: ntp.server",
+   "set": {
+    "ntp.server": "time.cloudflare.com"
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: ntp.interval",
+   "set": {
+    "ntp.interval": 31
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: ntp.rtc.type",
+   "set": {
+    "ntp.rtc.type": 1
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: ntp.rtc.sdapin",
+   "set": {
+    "ntp.rtc.sdapin": 255
+   },
+   "restart": true
+  },
+  {
+   "name": "restart: ntp.rtc.sclpin",
+   "set": {
+    "ntp.rtc.sclpin": 255
+   },
+   "restart": true
+  },
+  {
+   "name": "unknown key restarts",
+   "set": {
+    "hardware.newthing": 1
+   },
+   "restart": true
+  },
+  {
+   "name": "unknown section restarts",
+   "set": {
+    "cloud.enabled": 1
+   },
+   "restart": true
+  },
+  {
+   "name": "a key removed restarts",
+   "set": {
+    "hardware.wifipin": null
+   },
+   "restart": true
+  },
+  {
+   "name": "a live key removed is still live",
+   "set": {
+    "hardware.relay2.doorname": null
+   },
+   "restart": false
+  },
+  {
+   "name": "a key added by the UI restarts (an older file lacks it)",
+   "before": {
+    "hardware.doorbellpin": null
+   },
+   "set": {},
+   "restart": true
+  },
+  {
+   "name": "legacy numeric time zone replaced by tzinfo restarts",
+   "before": {
+    "ntp.timezone": 1,
+    "ntp.tzinfo": null
+   },
+   "set": {
+    "ntp.tzinfo": "UTC-1"
+   },
+   "restart": true
+  },
+  {
+   "name": "mixed live and restart restarts",
+   "set": {
+    "hardware.doorname": "Main entrance",
+    "hardware.rpin": 255
+   },
+   "restart": true
+  },
+  {
+   "name": "mixed: a door name and the MQTT host",
+   "set": {
+    "hardware.relay2.doorname": "Yard gate",
+    "mqtt.host": "broker2.local"
+   },
+   "restart": true
+  },
+  {
+   "name": "every live key at once",
+   "set": {
+    "hardware.rtime": 5000,
+    "hardware.relay2.rtime": 4000,
+    "hardware.relay3.rtime": 2000,
+    "hardware.relay4.rtime": 2000,
+    "hardware.doorname": "Main entrance",
+    "hardware.relay2.doorname": "Yard gate",
+    "hardware.relay3.doorname": "Store",
+    "hardware.relay4.doorname": "Office",
+    "hardware.maxOpenDoorTime": 120,
+    "hardware.requirepincodeafterrfid": 1,
+    "hardware.allowpincodeonly": 1,
+    "hardware.useridstoragemode": "decimal",
+    "hardware.removeparitybits": 0,
+    "hardware.reader1.door": 1,
+    "hardware.reader1.direction": 1,
+    "hardware.reader2.door": 0,
+    "hardware.reader2.direction": 2,
+    "general.openinghours": [
+     "000000001111111111000000",
+     "111111111111111111111111",
+     "111111111111111111111111",
+     "111111111111111111111111",
+     "111111111111111111111111",
+     "111111111111111111111111",
+     "111111111111111111111111"
+    ],
+    "general.logging": 0,
+    "ntp.tzinfo": "GMT0BST,M3.5.0/1,M10.5.0",
+    "mqtt.syncrate": 60,
+    "mqtt.mqttlog": 1,
+    "mqtt.remoteadmin": 1,
+    "mqtt.doorcontrol": 1,
+    "mqtt.carduid": 2,
+    "network.idleoff": 1,
+    "network.idlemins": 30
+   },
+   "restart": false
+  },
+  {
+   "name": "same value, other type: true for 1, \"16\" for 16",
+   "set": {
+    "hardware.rpin": "16",
+    "general.logging": true,
+    "hardware.reader2.enabled": true,
+    "mqtt.port": "1883"
+   },
+   "restart": false
+  },
+  {
+   "name": "the command key is ignored",
+   "set": {
+    "command": "something"
+   },
+   "restart": false
+  },
+  {
+   "name": "a section replaced by a value restarts",
+   "set": {
+    "mqtt": 0
+   },
+   "restart": true
+  },
+  {
+   "name": "an empty object added is no change",
+   "set": {
+    "extra": {}
+   },
+   "restart": false
+  },
+  {
+   "name": "first save (nothing stored) restarts",
+   "beforeNull": true,
+   "set": {},
+   "restart": true
+  },
+  {
+   "name": "a stored WiFi Timeout (offtime) replaced by idle-off restarts",
+   "before": {
+    "network.offtime": 600,
+    "network.idleoff": null,
+    "network.idlemins": null
+   },
+   "set": {},
+   "restart": true
+  },
+  {
+   "name": "a reader 2 door and side swap (one door, in/out)",
+   "set": {
+    "hardware.reader1.door": 0,
+    "hardware.reader2.door": 0,
+    "hardware.reader1.direction": 1,
+    "hardware.reader2.direction": 2
+   },
+   "restart": false
+  }
+ ]
+}

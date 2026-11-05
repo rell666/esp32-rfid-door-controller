@@ -1,0 +1,51 @@
+<template id="generalcontent">
+<div class="set-page set-general">
+    <div class="pagehead">
+        <h1>General</h1>
+        <p>The reader's name on the network, automatic restarts and opening hours.</p>
+    </div>
+
+    <section class="card">
+        <h2>Device</h2>
+        <div class="grid2">
+            <div class="field">
+                <div class="labelrow"><label for="hostname" id="lbl-hostname">Host Name</label><button type="button" class="help" aria-describedby="lbl-hostname" data-content="The reader's name on your network, up to 32 characters (letters, digits and hyphens work everywhere). Computers with Bonjour / mDNS can open it as http://name.local; phones often cannot, so use the IP address there." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                <input placeholder="ironframe-rfid" value="ironframe-rfid" id="hostname" type="text" maxlength="32" autocomplete="off" autocapitalize="off" spellcheck="false" data-oninput="hostnameTyped">
+                <div class="hint" id="hostnamehint"></div>
+            </div>
+            <div class="field">
+                <div class="labelrow"><label for="autorestart" id="lbl-autorestart">Auto Restart</label><button type="button" class="help" aria-describedby="lbl-autorestart" data-content="Restarts the reader regularly, which clears any slow memory leak. A restart takes a few seconds; cards are not read meanwhile." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                <select id="autorestart" name="autorestart" data-onchange="autoRestartChanged">
+                    <option value="0">Never</option>
+                    <option value="86400" selected>Every 24 hours</option>
+                    <option value="604800">Every 7 days</option>
+                    <option value="2592000">Every 30 days</option>
+                    <option value="custom">Custom (in seconds)...</option>
+                </select>
+                <div class="hint" id="autorestartmaglock" hidden></div>
+            </div>
+        </div>
+        <div class="field" id="autorestart-customrow" hidden>
+            <label for="autorestart-custom">Restart every (seconds)</label>
+            <input placeholder="Restart time in seconds" value="3600" id="autorestart-custom" type="number" inputmode="numeric" min="300" step="1" data-oninput="autoRestartChanged">
+            <div class="hint" id="autorestart-hint"></div>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Opening hours<button type="button" class="help" data-content="When users who are not admins can open the door. Admin cards open it at any time. The reader needs to know the time: without it, users are refused while any hour is closed." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></h2>
+        <p class="muted small">Tap an hour to open or close it. <span class="set-key set-key-open"></span> open <span class="set-key"></span> closed. Times are the reader's local time (Time page).</p>
+        <div id="openinghours" class="set-hours"></div>
+        <div class="set-copy">
+            <span class="muted small">Copy Monday to</span>
+            <button type="button" class="btn small" data-onclick="copyMonday" data-arg="weekdays">Tue to Fri</button>
+            <button type="button" class="btn small" data-onclick="copyMonday" data-arg="all">Every day</button>
+        </div>
+    </section>
+
+    <div class="actions set-save">
+        <p class="muted small">Save shows what changes for you to confirm; nothing is stored on the reader until you do.</p>
+        <button type="button" data-onclick="savePage" data-arg="general" class="btn primary">Save</button>
+    </div>
+</div>
+</template>

@@ -1,0 +1,59 @@
+/* Doors & Readers page (hardware.js): door cards holding reader cards. */
+
+/* the one-line summary of which reader opens which door */
+.hw-summary { display: flex; gap: 10px; align-items: flex-start; margin: 4px 0 12px; padding: 12px 14px; border-radius: 10px; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.35); color: #fff; }
+.hw-summary .icon { color: var(--if-amber); margin-top: 1px; }
+.hw-summary p { margin: 0; }
+
+/* the "Doors" heading between the cards */
+.hw-section { margin: 28px 0 4px; }
+.hw-section-sub { margin-bottom: 12px; }
+
+/* a door card's title: icon, "Door N", its name */
+.hw-door-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.hw-door-head .icon { color: var(--if-amber); }
+.card .hw-door-head h2 { flex: none; margin: 0; }
+.hw-door-name { flex: 1; min-width: 0; color: var(--if-400); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hw-door-name:not(:empty)::before { content: "\00b7\00a0"; }
+.hw-door > .subhead:first-of-type { margin-top: 8px; }
+
+/* a select with a button beside it (relay pin + Test) */
+.hw-pinrow { display: flex; gap: 8px; align-items: stretch; }
+.hw-pinrow select { flex: 1; min-width: 0; }
+.hw-pinrow .btn { flex: none; min-height: var(--tap); min-width: 72px; }
+
+/* a number with its unit inside the box */
+.hw-unit { position: relative; }
+.hw-unit input { padding-right: 48px; }
+.hw-unit span { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); color: var(--if-400); pointer-events: none; }
+
+/* a reader's card inside its door's card */
+.hw-reader { margin: 0 0 12px; padding: 14px 14px 2px; border: 1px solid var(--if-700); border-left: 4px solid var(--if-amber); border-radius: 10px; background: rgba(10, 25, 41, 0.55); }
+.hw-reader-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.hw-reader-head h3 { margin: 0 4px 0 0; }
+.hw-noreader { margin: 0 0 8px; padding: 12px 14px; border: 1px dashed var(--if-700); border-radius: 10px; }
+.hw-flash { animation: hwflash 1.2s ease; }
+@keyframes hwflash { 0%, 40% { box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.6); } 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); } }
+
+/* switches inside a .field (app.css makes a field's label a block) */
+.field > label.switch { display: flex; margin-bottom: 0; }
+.field > label.switch + .hint { margin-top: 0; }
+
+/* the advanced pins, folded away */
+.hw-advanced { margin-top: 8px; border-top: 1px solid var(--if-800); }
+.hw-advanced > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-height: var(--tap); padding: 12px 0 12px 28px; position: relative; cursor: pointer; list-style: none; font-weight: 600; color: var(--if-100); }
+.hw-advanced > summary::-webkit-details-marker { display: none; }
+.hw-advanced > summary::before { content: ""; position: absolute; left: 6px; top: 50%; width: 8px; height: 8px; border-right: 2px solid var(--if-amber); border-bottom: 2px solid var(--if-amber); transform: translateY(-70%) rotate(-45deg); transition: transform 0.15s; }
+.hw-advanced[open] > summary::before { transform: translateY(-70%) rotate(45deg); }
+.hw-advanced > summary span:first-child { flex: 1 1 auto; }
+.hw-advanced > summary .muted { font-weight: 400; }
+
+/* Save, with what it does */
+.hw-save { align-items: center; }
+.hw-save p { flex: 1 1 220px; margin: 0; }
+@media (max-width: 599px) {
+  .hw-save .btn { width: 100%; }
+}
+
+/* help buttons: a 36 px touch target (app.css draws them 28 px), same look */
+.hw-page .help { width: 36px; height: 36px; margin: -8px -4px -8px 0; }

@@ -1,0 +1,588 @@
+bool mqttPublishRawEvent(const String &payload);
+
+// config.adminHa1 / adminMustChange are rewritten by loop() (password
+// change) while the async web task reads them (login, WebSocket connect), so
+// readers take a copy under authMutex and the writer copies the new ones in
+// under it.
+struct AdminSnapshot
+{
+	String ha1;
+	bool mustChange;
+};
+
+AdminSnapshot adminSnapshot()
+{
+	std::lock_guard<std::mutex> lock(authMutex);
+	return AdminSnapshot{String(config.adminHa1), config.adminMustChange};
+}
+
+// Send a JSON document to one WebSocket client (by id) or, with id 0, to all.
+// Clients are addressed by id rather than pointer because a browser can
+// disconnect between a request being queued and loop() answering it.
+//
+// A document that ran out of room has silently lost its last members
+// (ArduinoJson drops them): logged once per reply kind, so a reply cut short
+// on the board shows in the Event Log (review 8 V16).
+void wsSendJson(uint32_t clientId, JsonDocument &doc)
+{
+	if (doc.overflowed())
+	{
+		static char logged[8][24] = {};
+		const char *kind = doc["resultof"] | (const char *)(doc["command"] | "?");
+		bool seen = false;
+		for (auto &l : logged)
+			seen = seen || strcmp(l, kind) == 0;
+		for (auto &l : logged)
+			if (!seen && l[0] == '\0')
+			{
+				snprintf(l, sizeof(l), "%s", kind);
+				writeEvent("ERRO", "sys", "A reply to the web page was too large and was cut short", kind);
+				break;
+			}
+	}
+	String out;
+	serializeJson(doc, out);
+	if (clientId)
+		ws.text(clientId, out);
+	else
+		ws.textAll(out);
+}
+
+void wsSendText(uint32_t clientId, const char *msg)
+{
+	if (clientId)
+		ws.text(clientId, msg);
+	else
+		ws.textAll(msg);
+}
+
+/*
+ * Log writing
+ *
+ * writeEvent()/writeLatest() may be called from the async web server task, the
+ * MQTT client task, WiFi event callbacks and loop(). Upstream wrote straight to
+ * the filesystem from all of them, so lines from different tasks interleaved
+ * and corrupted the log. Now every caller only formats a line and queues it;
+ * loop() is the single writer (flushLogQueue).
+ */
+
+#define LOG_EVENT_FILE "/eventlog.json"
+#define LOG_LATEST_FILE "/latestlog.json"
+#define LOG_MAX_BYTES (64 * 1024)	   // rotate when a log would grow past this
+#define LOG_KEEP_ROTATED 3			   // eventlog.json.1 .. .3 are kept
+#define LOG_MIN_FREE_BYTES (48 * 1024) // never fill the filesystem with logs
+#define LOG_QUEUE_MAX 128
+#define LOG_FLUSH_SLICE_MS 100 // time flushLogQueue() may spend per loop() pass
+#define LOGTYPE_LATESTLOG 0
+#define LOGTYPE_EVENTLOG 1
+#define LOG_ITEMS_PER_PAGE 50
+#define LOG_PAGE_DOC_BYTES 12288
+#define FILES_PER_PAGE 20
+#define MIN_SPIFF_BYTES 4096
+
+enum LogSink : uint8_t
+{
+	SINK_EVENT_FILE,
+	SINK_LATEST_FILE,
+	SINK_MQTT
+};
+
+struct PendingLog
+{
+	LogSink sink;
+	String line;
+};
+
+std::deque<PendingLog> logQueue;
+std::mutex logQueueMutex;
+uint32_t logEntriesDropped = 0;
+
+static void enqueueLog(LogSink sink, String &&line)
+{
+	std::lock_guard<std::mutex> lock(logQueueMutex);
+	if (logQueue.size() >= LOG_QUEUE_MAX)
+	{
+		logQueue.pop_front();
+		logEntriesDropped++;
+	}
+	logQueue.push_back(PendingLog{sink, std::move(line)});
+}
+
+// The const char * form takes literals and buffers with no String built per
+// call (about 100 call sites, several on the card path: review 8 R4-10);
+// the String form forwards to it.
+void writeEvent(const char *type, const char *src, const char *desc, const char *data)
+{
+	DynamicJsonDocument root(768);
+	root["type"] = type; // serialised below, while the pointers are valid
+	root["src"] = src;
+	root["desc"] = desc;
+	root["data"] = data;
+	root["time"] = deviceClock.epoch;
+	String line;
+	if (config.mqttEvents && config.mqttEnabled) // log to MQTT (to the file while the broker is down: flushLogQueue)
+	{
+		root["cmd"] = "event";
+		root["hostname"] = config.deviceHostname;
+		serializeJson(root, line);
+		enqueueLog(SINK_MQTT, std::move(line));
+	}
+	else if (config.loggingEnabled) // log to file
+	{
+		serializeJson(root, line);
+		enqueueLog(SINK_EVENT_FILE, std::move(line));
+	}
+#ifdef DEBUG
+	Serial.printf("[ %s ] %s | %s | %s\n", type, src, desc, data);
+#endif
+}
+
+void writeEvent(const String &type, const String &src, const String &desc, const String &data)
+{
+	writeEvent(type.c_str(), src.c_str(), desc.c_str(), data.c_str());
+}
+
+const char *doorLabel(int door); // door.esp
+
+// door: the relay index the reader is bound to, or -1 (not door-specific)
+// The newest Access Log entry, for Status (plan 1.9 C3); kept with logging
+// off too. RAM only: none after a restart until the next card.
+struct LastAccess
+{
+	bool any = false;
+	String uid, name, door;
+	int access = ACCESS_GRANTED;
+	uint32_t time = 0;
+};
+LastAccess lastAccess;
+
+void writeLatest(String uid, String username, int acctype, int access = ACCESS_GRANTED, int door = -1, const char *dir = nullptr)
+{
+	lastAccess.any = true;
+	lastAccess.uid = uid;
+	lastAccess.name = username;
+	lastAccess.door = door >= 0 ? String(doorLabel(door)) : String("");
+	lastAccess.access = access;
+	lastAccess.time = deviceClock.epoch;
+	if (!config.loggingEnabled)
+		return; // access log switched off (General > Logging); MQTT access events are separate
+	DynamicJsonDocument root(512);
+	root["uid"] = uid;
+	root["username"] = username;
+	root["acctype"] = acctype;
+	root["access"] = access;
+	root["timestamp"] = deviceClock.epoch;
+	if (door >= 0)
+		root["door"] = doorLabel(door);
+	if (dir)
+		root["dir"] = dir; // "in" / "out": the reader's side of the door
+	String line;
+	serializeJson(root, line);
+	enqueueLog(SINK_LATEST_FILE, std::move(line));
+}
+
+struct LittleFSAdapter
+{
+	bool exists(const char *p) { return LittleFS.exists(p); }
+	bool remove(const char *p) { return LittleFS.remove(p); }
+	bool rename(const char *a, const char *b) { return LittleFS.rename(a, b); }
+};
+
+static core::FreeSpace fsFree; // core/storagespace.h
+
+// The size of LittleFS, read once: totalBytes() walks the whole store.
+static size_t fsTotalBytes()
+{
+	static size_t total = 0;
+	if (total == 0)
+		total = LittleFS.totalBytes();
+	return total;
+}
+
+// Free bytes on LittleFS: the estimate, or (exact, or none for MAX_AGE_MS)
+// a walk of the whole store. The size never changes, so it is read once.
+static size_t fsFreeBytes(bool exact = false)
+{
+	uint64_t now = uptimeMs();
+	if (!exact && fsFree.fresh(now))
+		return fsFree.estimate();
+	size_t total = fsTotalBytes();
+	size_t used = LittleFS.usedBytes();
+	fsFree.measured(now, used < total ? total - used : 0);
+	return fsFree.estimate();
+}
+
+// at least bytes free: the estimate, then a fresh measure before saying no
+static bool fsFreeAtLeast(size_t bytes)
+{
+	return fsFreeBytes() >= bytes || fsFreeBytes(true) >= bytes;
+}
+
+// Make room by deleting rotated logs, oldest first. Returns true if enough
+// space is available afterwards.
+static bool ensureLogSpace(size_t needed)
+{
+	if (fsFreeAtLeast(LOG_MIN_FREE_BYTES + needed))
+		return true;
+	for (int i = LOG_KEEP_ROTATED; i >= 1; i--)
+	{
+		const char *bases[] = {LOG_EVENT_FILE, LOG_LATEST_FILE};
+		for (const char *b : bases)
+		{
+			String old = String(b) + "." + i;
+			if (LittleFS.exists(old))
+			{
+				LittleFS.remove(old);
+				if (fsFreeBytes(true) >= LOG_MIN_FREE_BYTES + needed)
+					return true;
+			}
+		}
+	}
+	return fsFreeBytes(true) >= LOG_MIN_FREE_BYTES + needed;
+}
+
+static bool appendLogLine(const char *path, const String &line)
+{
+	size_t current = 0;
+	if (LittleFS.exists(path))
+	{
+		File probe = LittleFS.open(path, "r");
+		if (probe)
+		{
+			current = probe.size();
+			probe.close();
+		}
+	}
+	if (current + line.length() + 1 > LOG_MAX_BYTES)
+	{
+		LittleFSAdapter fsa;
+		core::rotateLog(fsa, path, LOG_KEEP_ROTATED);
+	}
+	// each step reads the filesystem's metadata (the free-space check walks
+	// all of it): on an emulated flash one append outlasted the loop
+	// watchdog, so it is fed between the steps as well as between appends
+	esp_task_wdt_reset();
+	if (!ensureLogSpace(line.length() + 1))
+		return false;
+	esp_task_wdt_reset();
+	File f = LittleFS.open(path, "a");
+	if (!f)
+		return false;
+	// one write call per line so a power cut leaves at most one partial line
+	String withNl = line + "\n";
+	size_t written = f.write((const uint8_t *)withNl.c_str(), withNl.length());
+	f.close();
+	fsFree.spent(withNl.length());
+	return written == withNl.length();
+}
+
+// all: write everything now (before a restart), with no time limit.
+void flushLogQueue(bool all = false)
+{
+	{
+		// Nothing to write, as on nearly every loop() pass: return before
+		// building a batch. A std::deque allocates even when empty, so this
+		// allocated and freed heap about a thousand times a second, between
+		// the network stack's own allocations, for months of uptime.
+		std::lock_guard<std::mutex> lock(logQueueMutex);
+		if (logQueue.empty() && logEntriesDropped == 0)
+			return;
+	}
+	std::deque<PendingLog> batch;
+	uint32_t dropped;
+	{
+		std::lock_guard<std::mutex> lock(logQueueMutex);
+		batch.swap(logQueue);
+		dropped = logEntriesDropped;
+		logEntriesDropped = 0;
+	}
+	if (dropped)
+	{
+		DynamicJsonDocument root(256);
+		root["type"] = "WARN";
+		root["src"] = "sys";
+		root["desc"] = "Log queue overflow, entries dropped";
+		root["data"] = String(dropped);
+		root["time"] = deviceClock.epoch;
+		String line;
+		serializeJson(root, line);
+		batch.push_front(PendingLog{SINK_EVENT_FILE, line});
+	}
+	// At most LOG_FLUSH_SLICE_MS per loop() pass: each line is several
+	// LittleFS operations, and a backlog (boot, a burst of events) written in
+	// one go delayed the readers and could outlast the 8 s loop watchdog.
+	// What is left goes back to the front of the queue for the next pass.
+	uint64_t until = uptimeMs() + LOG_FLUSH_SLICE_MS;
+	while (!batch.empty())
+	{
+		if (!all && uptimeMs() >= until)
+		{
+			std::lock_guard<std::mutex> lock(logQueueMutex);
+			while (!batch.empty())
+			{
+				logQueue.push_front(std::move(batch.back()));
+				batch.pop_back();
+			}
+			while (logQueue.size() > LOG_QUEUE_MAX)
+			{
+				logQueue.pop_front(); // the oldest give way, as in enqueueLog()
+				logEntriesDropped++;
+			}
+			return;
+		}
+		PendingLog p = std::move(batch.front());
+		batch.pop_front();
+		switch (p.sink)
+		{
+		case SINK_EVENT_FILE:
+			appendLogLine(LOG_EVENT_FILE, p.line);
+			break;
+		case SINK_LATEST_FILE:
+			appendLogLine(LOG_LATEST_FILE, p.line);
+			break;
+		case SINK_MQTT:
+			// Broker down (or the publish refused): the Event Log file keeps
+			// it rather than losing it, unless logging is off. Not both
+			// always: MQTT logging is chosen to spare the flash.
+			if (!mqttPublishRawEvent(p.line) && config.loggingEnabled)
+				appendLogLine(LOG_EVENT_FILE, p.line);
+			break;
+		}
+		esp_task_wdt_reset(); // one append can take a while on a slow (or emulated) flash
+	}
+}
+
+/*
+ * Log reading
+ *
+ * The browser sends the byte offset to continue from ("pos") and gets the next
+ * one back ("nextpos"), so any number of tabs can page through any log file
+ * independently. Upstream kept a single global offset for all of them.
+ */
+void sendLogFile(int page, String fileName, int logFileType, uint32_t clientId, size_t pos)
+{
+	const char *cmd = logFileType == LOGTYPE_EVENTLOG ? "eventlist" : "latestlist";
+	if (!core::isValidLogFilename(fileName.c_str()))
+	{
+		DynamicJsonDocument err(256);
+		err["command"] = "result";
+		err["resultof"] = cmd;
+		err["result"] = false;
+		err["message"] = "Invalid log file name";
+		wsSendJson(clientId, err);
+		return;
+	}
+
+	DynamicJsonDocument root(LOG_PAGE_DOC_BYTES);
+	root["command"] = cmd;
+	root["page"] = page;
+	// Reserve the scalar fields before the list so they can be updated in
+	// place even if the list fills the document.
+	root["haspages"] = page;
+	root["nextpos"] = 0;
+	root["eof"] = true;
+	JsonArray items = root.createNestedArray("list");
+
+	File logFile = LittleFS.open(fileName, "r");
+	if (logFile)
+	{
+		size_t size = logFile.size();
+		core::LogPage lp = core::readLogPage(logFile, pos, LOG_ITEMS_PER_PAGE, items, root);
+		logFile.close();
+		root["nextpos"] = lp.nextPos;
+		root["eof"] = lp.eof;
+		if (!lp.eof)
+		{
+			// Rough page estimate for the "Loading x/y" indicator only; the
+			// browser stops on eof, not on this number.
+			size_t consumed = lp.nextPos > pos ? lp.nextPos - pos : 1;
+			size_t remaining = size > lp.nextPos ? size - lp.nextPos : 0;
+			size_t remainingPages = (remaining + consumed - 1) / consumed;
+			root["haspages"] = page + (int)(remainingPages > 0 ? remainingPages : 1);
+		}
+	}
+	wsSendJson(clientId, root);
+
+	DynamicJsonDocument result(128);
+	result["command"] = "result";
+	result["resultof"] = cmd;
+	result["result"] = true;
+	wsSendJson(clientId, result);
+}
+
+void logMaintenance(String action, String filename, uint32_t clientId)
+{
+#ifdef DEBUG
+	Serial.printf("[DEBUG] Log Maintenance Action: %s on %s\n", action.c_str(), filename.c_str());
+#endif
+	DynamicJsonDocument result(256);
+	result["command"] = "result";
+	result["resultof"] = "logfileMaintenance";
+	result["result"] = true;
+
+	if (!core::isValidLogFilename(filename.c_str()))
+	{
+		result["result"] = false;
+		result["message"] = "Invalid log file name";
+		if (clientId)
+			wsSendJson(clientId, result);
+		return;
+	}
+
+	if (action == "delete")
+	{
+		// the result said deleted whatever LittleFS answered (review 8 V21)
+		if (!LittleFS.remove(filename))
+		{
+			result["result"] = false;
+			result["message"] = "The file could not be deleted";
+		}
+	}
+	else if (action == "rollover")
+	{
+		if (filename == LOG_EVENT_FILE || filename == LOG_LATEST_FILE)
+		{
+			LittleFSAdapter fsa;
+			core::rotateLog(fsa, filename.c_str(), LOG_KEEP_ROTATED);
+		}
+		else
+		{
+			result["result"] = false;
+			result["message"] = "Only the current log can be rolled over";
+		}
+	}
+	else if (action == "split")
+	{
+		// split a file into two new files of roughly the same size
+		size_t ext1 = 1;
+		while (LittleFS.exists(filename + ".split." + ext1))
+			ext1++;
+		size_t ext2 = ext1 + 1;
+		while (LittleFS.exists(filename + ".split." + ext2))
+			ext2++;
+		String name1 = filename + ".split." + ext1;
+		String name2 = filename + ".split." + ext2;
+
+		File logFile = LittleFS.open(filename, "r");
+		if (!logFile)
+		{
+			result["result"] = false;
+			result["message"] = "File not found";
+		}
+		// the logs' own floor, as every log write: splits used to need only
+		// 4 KB more than the file, so repeated ones filled the store (review 7)
+		else if (!fsFreeAtLeast(LOG_MIN_FREE_BYTES + logFile.size()) || !core::isValidLogFilename(name1.c_str()) || !core::isValidLogFilename(name2.c_str()))
+		{
+			logFile.close();
+			result["result"] = false;
+			result["message"] = "Not enough space on the filesystem";
+		}
+		else
+		{
+			size_t truncatePosition = logFile.size() / 2;
+			logFile.seek(truncatePosition);
+			logFile.readStringUntil('\n');
+			truncatePosition = logFile.position();
+			logFile.seek(0);
+			File newFile1 = LittleFS.open(name1, "w");
+			File newFile2 = LittleFS.open(name2, "w");
+			size_t total = logFile.size(), written = 0;
+			uint8_t buf[512];
+			while (logFile.available())
+			{
+				size_t want = sizeof(buf);
+				size_t at = logFile.position();
+				if (at < truncatePosition && at + want > truncatePosition)
+					want = truncatePosition - at;
+				size_t n = logFile.read(buf, want);
+				if (n == 0)
+					break;
+				size_t w = (at < truncatePosition ? newFile1 : newFile2).write(buf, n);
+				written += w;
+				if (w != n)
+					break;
+				esp_task_wdt_reset(); // a 64 KB log is 128 writes; yield() does not feed the loop watchdog
+			}
+			bool ok = newFile1 && newFile2 && written == total;
+			logFile.close();
+			newFile1.close();
+			newFile2.close();
+			fsFree.spent(written);
+			if (!ok)
+			{
+				// it answered done whatever was written
+				LittleFS.remove(name1);
+				LittleFS.remove(name2);
+				result["result"] = false;
+				result["message"] = "The split could not be written: the log is unchanged";
+			}
+		}
+	}
+	else
+	{
+		result["result"] = false;
+		result["message"] = "Unknown action";
+	}
+
+	if (clientId)
+		wsSendJson(clientId, result);
+}
+
+void sendFileList(int page, uint32_t clientId)
+{
+	DynamicJsonDocument root(4096);
+	root["command"] = "listfiles";
+	// the page comes from the browser: 0, negative or huge made the double
+	// (page - 1) * 20.0 out of range for size_t (undefined behaviour)
+	if (page < 1)
+		page = 1;
+	root["page"] = page;
+	JsonArray items = root.createNestedArray("list");
+
+	uint64_t first = (uint64_t)(page - 1) * FILES_PER_PAGE;
+	uint64_t last = (uint64_t)page * FILES_PER_PAGE;
+	size_t numFiles = 0;
+
+	File dir = LittleFS.open("/");
+	if (dir && dir.isDirectory())
+	{
+		File f = dir.openNextFile();
+		while (f)
+		{
+			if (!f.isDirectory())
+			{
+				String thisFileName = String("/") + f.name();
+				if (core::isValidLogFilename(thisFileName.c_str()))
+				{
+					if (numFiles >= first && numFiles < last)
+					{
+						JsonObject item = items.createNestedObject();
+						item["filename"] = thisFileName;
+						item["filesize"] = f.size();
+					}
+					numFiles++;
+				}
+			}
+			f = dir.openNextFile();
+			esp_task_wdt_reset(); // the whole root directory is walked for every page
+		}
+	}
+
+	root["haspages"] = (numFiles + FILES_PER_PAGE - 1) / FILES_PER_PAGE;
+	wsSendJson(clientId, root);
+	wsSendText(clientId, "{\"command\":\"result\",\"resultof\":\"listfiles\",\"result\": true}");
+}
+
+void sendEventLog(int page, String fileName, uint32_t clientId, size_t pos)
+{
+	if (fileName.length() == 0)
+		fileName = LOG_EVENT_FILE;
+	sendLogFile(page, fileName, LOGTYPE_EVENTLOG, clientId, pos);
+}
+
+void sendLatestLog(int page, String fileName, uint32_t clientId, size_t pos)
+{
+	if (fileName.length() == 0)
+		fileName = LOG_LATEST_FILE;
+	sendLogFile(page, fileName, LOGTYPE_LATESTLOG, clientId, pos);
+}

@@ -1,0 +1,33 @@
+// Doorbell input: published over MQTT and logged when it rings. A button
+// between the pin and GND (core::doorbellPressed), debounced like the exit
+// buttons.
+
+static Bounce doorbellButton;
+static core::DoorbellMonitor doorbell;
+
+// applySettings()
+void setupDoorbell()
+{
+	doorbellButton.attach(config.doorbellpin, INPUT_PULLUP);
+	doorbellButton.interval(30);
+}
+
+bool doorbellRinging()
+{
+	return doorbell.ringing();
+}
+
+void doorbellStatus()
+{
+	if (config.doorbellpin == 255)
+		return;
+	doorbellButton.update();
+	int change = doorbell.update(core::doorbellPressed(doorbellButton.read()));
+	if (change > 0)
+	{
+		writeEvent("INFO", "doorbell", "Doorbell ringing", "");
+		mqttPublishIo("doorbell", "ON");
+	}
+	else if (change < 0)
+		mqttPublishIo("doorbell", "OFF");
+}

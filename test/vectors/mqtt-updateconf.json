@@ -1,0 +1,526 @@
+{
+ "about": "MQTT remote admin: what updateconf cannot change (core::keepRemoteAdminKept, core::REMOTE_ADMIN_KEPT in src/core/configpolicy.h; decision 2026-10-15, option B). Asserted by test/native/tests.cpp. Each case starts from stored, applies set (dotted path -> value; null removes the key) to make the incoming settings, merges them with stored and expects exactly the keys in ignored (any order) and the values in expect (null: the key is absent). Every result must also pass the config policy. The simulator has no MQTT, so these run on the firmware code only.",
+ "stored": {
+  "network": {
+   "ssid": "site-wifi",
+   "pswd": "wifi-secret-123",
+   "wmode": 0,
+   "dhcp": 1,
+   "bssid": "",
+   "hide": 0,
+   "offtime": 0,
+   "fallbackmode": 1,
+   "apip": "192.168.4.1",
+   "apsubnet": "255.255.255.0",
+   "ip": "",
+   "subnet": "",
+   "gateway": "",
+   "dns": ""
+  },
+  "hardware": {
+   "readertype": 1,
+   "wgd0pin": 34,
+   "wgd1pin": 35,
+   "rpin": 16,
+   "rtype": 1,
+   "ltype": 0,
+   "rtime": 3000,
+   "doorname": "Front",
+   "numrelays": 2,
+   "wifipin": 255,
+   "doorstatpin": 255,
+   "doorbellpin": 255,
+   "accessdeniedpin": 255,
+   "beeperpin": 255,
+   "ledwaitingpin": 255,
+   "openlockpin": 13,
+   "maxOpenDoorTime": 60,
+   "useridstoragemode": "hexadecimal",
+   "removeparitybits": 1,
+   "requirepincodeafterrfid": 1,
+   "allowpincodeonly": 0,
+   "rdm6300pin": 255,
+   "sspin": 255,
+   "rfidgain": 0,
+   "relay2": {
+    "rpin": 17,
+    "rtype": 1,
+    "ltype": 0,
+    "rtime": 3000,
+    "doorname": "Back",
+    "doorstatpin": 255,
+    "openlockpin": 4
+   },
+   "reader1": {
+    "door": 0,
+    "ledpin": 255,
+    "beeperpin": 255,
+    "feedbackactivehigh": 1,
+    "direction": 0
+   },
+   "reader2": {
+    "enabled": 1,
+    "door": 1,
+    "wgd0pin": 32,
+    "wgd1pin": 33,
+    "ledpin": 255,
+    "beeperpin": 255,
+    "feedbackactivehigh": 1,
+    "direction": 0
+   }
+  },
+  "general": {
+   "hostnm": "ironframe-rfid",
+   "restart": 0,
+   "pswd": "55660a03a22f4e179a972642deb67353",
+   "pswdhash": 1,
+   "logging": 1,
+   "openinghours": [
+    "111111111111111111111111",
+    "111111111111111111111111",
+    "111111111111111111111111",
+    "111111111111111111111111",
+    "111111111111111111111111",
+    "111111111111111111111111",
+    "111111111111111111111111"
+   ]
+  },
+  "mqtt": {
+   "enabled": 1,
+   "host": "192.168.1.60",
+   "port": 1883,
+   "topic": "ironframe",
+   "autotopic": 0,
+   "user": "door",
+   "pswd": "mqtt-secret-456",
+   "syncrate": 180,
+   "mqttlog": 0,
+   "mqttha": 1,
+   "remoteadmin": 1,
+   "doorcontrol": 0,
+   "carduid": 1
+  },
+  "ntp": {
+   "server": "pool.ntp.org",
+   "interval": 30,
+   "tzinfo": "GMT0BST,M3.5.0/1,M10.5.0"
+  }
+ },
+ "cases": [
+  {
+   "name": "the stored settings sent back unchanged: nothing ignored",
+   "set": {},
+   "ignored": [],
+   "expect": {}
+  },
+  {
+   "name": "names, opening hours, time, logging and the other MQTT options change",
+   "set": {
+    "general.hostnm": "front-door",
+    "hardware.doorname": "Main",
+    "hardware.relay2.doorname": "Yard",
+    "general.openinghours": [
+     "000000001111111111000000",
+     "000000001111111111000000",
+     "000000001111111111000000",
+     "000000001111111111000000",
+     "000000001111111111000000",
+     "000000001111111111000000",
+     "000000001111111111000000"
+    ],
+    "general.logging": 0,
+    "general.restart": 86400,
+    "ntp.interval": 60,
+    "mqtt.syncrate": 60,
+    "mqtt.mqttlog": 1,
+    "mqtt.mqttha": 0,
+    "mqtt.carduid": 2,
+    "hardware.useridstoragemode": "decimal",
+    "hardware.removeparitybits": 0,
+    "hardware.rfidgain": 48
+   },
+   "ignored": [],
+   "expect": {
+    "general.hostnm": "front-door",
+    "hardware.doorname": "Main",
+    "hardware.relay2.doorname": "Yard",
+    "general.logging": 0,
+    "ntp.interval": 60,
+    "mqtt.carduid": 2,
+    "mqtt.syncrate": 60,
+    "hardware.useridstoragemode": "decimal"
+   }
+  },
+  {
+   "name": "door control cannot be turned on",
+   "set": {
+    "mqtt.doorcontrol": 1
+   },
+   "ignored": [
+    "mqtt.doorcontrol"
+   ],
+   "expect": {
+    "mqtt.doorcontrol": 0
+   }
+  },
+  {
+   "name": "remote admin cannot turn itself off",
+   "set": {
+    "mqtt.remoteadmin": 0
+   },
+   "ignored": [
+    "mqtt.remoteadmin"
+   ],
+   "expect": {
+    "mqtt.remoteadmin": 1
+   }
+  },
+  {
+   "name": "MQTT cannot be turned off",
+   "set": {
+    "mqtt.enabled": 0
+   },
+   "ignored": [
+    "mqtt.enabled"
+   ],
+   "expect": {
+    "mqtt.enabled": 1
+   }
+  },
+  {
+   "name": "broker, credentials and topic are kept",
+   "set": {
+    "mqtt.host": "evil.example",
+    "mqtt.port": 8883,
+    "mqtt.user": "x",
+    "mqtt.pswd": "other-pass",
+    "mqtt.topic": "elsewhere",
+    "mqtt.autotopic": 1
+   },
+   "ignored": [
+    "mqtt.host",
+    "mqtt.port",
+    "mqtt.user",
+    "mqtt.pswd",
+    "mqtt.topic",
+    "mqtt.autotopic"
+   ],
+   "expect": {
+    "mqtt.host": "192.168.1.60",
+    "mqtt.port": 1883,
+    "mqtt.user": "door",
+    "mqtt.pswd": "mqtt-secret-456",
+    "mqtt.topic": "ironframe",
+    "mqtt.autotopic": 0
+   }
+  },
+  {
+   "name": "the same broker password sent back is no change",
+   "set": {
+    "mqtt.pswd": "mqtt-secret-456"
+   },
+   "ignored": [],
+   "expect": {}
+  },
+  {
+   "name": "Wi-Fi settings are kept, each change named",
+   "set": {
+    "network.ssid": "evil-ap",
+    "network.pswd": "12345678",
+    "network.wmode": 1,
+    "network.bssid": "aa:bb:cc:dd:ee:ff"
+   },
+   "ignored": [
+    "network.ssid",
+    "network.pswd",
+    "network.wmode",
+    "network.bssid"
+   ],
+   "expect": {
+    "network.ssid": "site-wifi",
+    "network.pswd": "wifi-secret-123",
+    "network.wmode": 0,
+    "network.bssid": ""
+   }
+  },
+  {
+   "name": "a key added to the network section is dropped",
+   "set": {
+    "network.extra": 1
+   },
+   "ignored": [
+    "network.extra"
+   ],
+   "expect": {
+    "network.extra": null
+   }
+  },
+  {
+   "name": "network section left out: restored, nothing named",
+   "set": {
+    "network": null
+   },
+   "ignored": [],
+   "expect": {
+    "network.ssid": "site-wifi",
+    "network.pswd": "wifi-secret-123"
+   }
+  },
+  {
+   "name": "network section that is not an object",
+   "set": {
+    "network": "none"
+   },
+   "ignored": [
+    "network"
+   ],
+   "expect": {
+    "network.ssid": "site-wifi"
+   }
+  },
+  {
+   "name": "mqtt section left out: the kept keys restored, the others stay out",
+   "set": {
+    "mqtt": null
+   },
+   "ignored": [],
+   "expect": {
+    "mqtt.enabled": 1,
+    "mqtt.remoteadmin": 1,
+    "mqtt.host": "192.168.1.60",
+    "mqtt.syncrate": null,
+    "mqtt.carduid": null
+   }
+  },
+  {
+   "name": "the admin password is kept",
+   "set": {
+    "general.pswd": "New-Pass-2027"
+   },
+   "ignored": [
+    "general.pswd"
+   ],
+   "expect": {
+    "general.pswd": "55660a03a22f4e179a972642deb67353"
+   }
+  },
+  {
+   "name": "PIN required and PIN only are kept",
+   "set": {
+    "hardware.requirepincodeafterrfid": 0,
+    "hardware.allowpincodeonly": 1
+   },
+   "ignored": [
+    "hardware.requirepincodeafterrfid",
+    "hardware.allowpincodeonly"
+   ],
+   "expect": {
+    "hardware.requirepincodeafterrfid": 1,
+    "hardware.allowpincodeonly": 0
+   }
+  },
+  {
+   "name": "relay 1 pin, type, lock type and time are kept",
+   "set": {
+    "hardware.rpin": 21,
+    "hardware.rtype": 0,
+    "hardware.ltype": 1,
+    "hardware.rtime": 30000
+   },
+   "ignored": [
+    "hardware.rpin",
+    "hardware.rtype",
+    "hardware.ltype",
+    "hardware.rtime"
+   ],
+   "expect": {
+    "hardware.rpin": 16,
+    "hardware.rtype": 1,
+    "hardware.ltype": 0,
+    "hardware.rtime": 3000
+   }
+  },
+  {
+   "name": "when the relay is on, the door is ... (rhold) is kept, not added where the stored settings lack it",
+   "set": {
+    "hardware.rhold": 1,
+    "hardware.relay2.rhold": 1
+   },
+   "ignored": [
+    "hardware.rhold",
+    "hardware.relay2.rhold"
+   ],
+   "expect": {
+    "hardware.rhold": null,
+    "hardware.relay2.rhold": null
+   }
+  },
+  {
+   "name": "relay 2 pin, type, time, sensor and exit button are kept",
+   "set": {
+    "hardware.relay2.rpin": 21,
+    "hardware.relay2.ltype": 1,
+    "hardware.relay2.rtime": 100,
+    "hardware.relay2.doorstatpin": 22,
+    "hardware.relay2.openlockpin": 23
+   },
+   "ignored": [
+    "hardware.relay2.rpin",
+    "hardware.relay2.ltype",
+    "hardware.relay2.rtime",
+    "hardware.relay2.doorstatpin",
+    "hardware.relay2.openlockpin"
+   ],
+   "expect": {
+    "hardware.relay2.rpin": 17,
+    "hardware.relay2.ltype": 0,
+    "hardware.relay2.rtime": 3000,
+    "hardware.relay2.openlockpin": 4
+   }
+  },
+  {
+   "name": "a relay 3 the stored settings do not have is not added",
+   "set": {
+    "hardware.numrelays": 3,
+    "hardware.relay3": {
+     "rpin": 21,
+     "rtype": 1,
+     "ltype": 1,
+     "rtime": 5000,
+     "doorname": "Gate"
+    }
+   },
+   "ignored": [
+    "hardware.numrelays",
+    "hardware.relay3.rpin",
+    "hardware.relay3.rtype",
+    "hardware.relay3.ltype",
+    "hardware.relay3.rtime"
+   ],
+   "expect": {
+    "hardware.numrelays": 2,
+    "hardware.relay3.rpin": null,
+    "hardware.relay3.doorname": "Gate"
+   }
+  },
+  {
+   "name": "door 1 pins (sensor, exit button, doorbell, LEDs, beeper) are kept",
+   "set": {
+    "hardware.openlockpin": 255,
+    "hardware.doorstatpin": 27,
+    "hardware.doorbellpin": 26,
+    "hardware.wifipin": 25,
+    "hardware.accessdeniedpin": 14,
+    "hardware.beeperpin": 12,
+    "hardware.ledwaitingpin": 15
+   },
+   "ignored": [
+    "hardware.openlockpin",
+    "hardware.doorstatpin",
+    "hardware.doorbellpin",
+    "hardware.wifipin",
+    "hardware.accessdeniedpin",
+    "hardware.beeperpin",
+    "hardware.ledwaitingpin"
+   ],
+   "expect": {
+    "hardware.openlockpin": 13,
+    "hardware.doorstatpin": 255
+   }
+  },
+  {
+   "name": "reader type and reader pins are kept",
+   "set": {
+    "hardware.readertype": 0,
+    "hardware.wgd0pin": 26,
+    "hardware.wgd1pin": 27
+   },
+   "ignored": [
+    "hardware.readertype",
+    "hardware.wgd0pin",
+    "hardware.wgd1pin"
+   ],
+   "expect": {
+    "hardware.readertype": 1,
+    "hardware.wgd0pin": 34
+   }
+  },
+  {
+   "name": "reader blocks are kept, each change named",
+   "set": {
+    "hardware.reader2.door": 0,
+    "hardware.reader2.enabled": 0,
+    "hardware.reader1.direction": 1
+   },
+   "ignored": [
+    "hardware.reader1.direction",
+    "hardware.reader2.enabled",
+    "hardware.reader2.door"
+   ],
+   "expect": {
+    "hardware.reader2.door": 1,
+    "hardware.reader2.enabled": 1,
+    "hardware.reader1.direction": 0
+   }
+  },
+  {
+   "name": "the number of relays and the held-open time are kept",
+   "set": {
+    "hardware.numrelays": 1,
+    "hardware.maxOpenDoorTime": 0
+   },
+   "ignored": [
+    "hardware.numrelays",
+    "hardware.maxOpenDoorTime"
+   ],
+   "expect": {
+    "hardware.numrelays": 2,
+    "hardware.maxOpenDoorTime": 60
+   }
+  },
+  {
+   "name": "a value sent as text is a change",
+   "set": {
+    "hardware.rpin": "16"
+   },
+   "ignored": [
+    "hardware.rpin"
+   ],
+   "expect": {
+    "hardware.rpin": 16
+   }
+  },
+  {
+   "name": "the RTC (ntp.rtc) is kept: not added where the stored settings lack it",
+   "set": {
+    "ntp.rtc": {
+     "type": 1,
+     "sdapin": 21,
+     "sclpin": 22
+    }
+   },
+   "ignored": [
+    "ntp.rtc"
+   ],
+   "expect": {
+    "ntp.rtc": null
+   }
+  },
+  {
+   "name": "the time zone still changes next to a refused RTC",
+   "set": {
+    "ntp.tzinfo": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "ntp.rtc": {
+     "type": 2
+    }
+   },
+   "ignored": [
+    "ntp.rtc"
+   ],
+   "expect": {
+    "ntp.tzinfo": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "ntp.rtc": null
+   }
+  }
+ ]
+}

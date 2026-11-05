@@ -1,0 +1,33 @@
+<template id="logmaintenancecontent">
+<div class="logsettings">
+    <div class="pagehead">
+        <h1>Log Settings</h1>
+        <p>Switch logging on or off, and look after the log files stored on the reader.</p>
+    </div>
+    <section class="card">
+        <div class="field">
+            <div class="labelrow"><label class="switch" for="logging" id="lbl-logging">
+                <span>Logging
+                </span>
+                <input type="checkbox" id="logging" name="logging" value="1" checked data-onchange="setLogging"></label><button type="button" class="help" aria-describedby="lbl-logging" aria-label="Help" data-content="Writes the Access Log and the Event Log to the reader's storage. Switched off, nothing new is written; the files already stored are kept and can still be viewed or deleted. The change applies at once, without a restart. If MQTT logging is on (MQTT page), events go to MQTT instead and only reach the Event Log here while the MQTT server cannot be reached; the Access Log is still written here."><svg class="icon"><use href="#i-info"/></svg></button></div>
+            <div class="hint" id="loggingstate"></div>
+            <div class="savednote" id="loggingsaved" role="status" hidden><svg class="icon icon-sm"><use href="#i-check"/></svg>Saved on the reader. No restart needed.</div>
+        </div>
+    </section>
+    <section class="card flush">
+        <header class="filehead">
+            <h2>Log files <button type="button" class="help" aria-label="Help" data-content="View shows a file's entries. Split copies a large file into two new files of about half the size each (name.split.1 and .split.2), so each can be opened on a phone; the original is kept. New file starts an empty log: the current one becomes .1, older ones move to .2 and .3, and the oldest .3 is deleted. The reader also starts a new file by itself when the current one is full, and deletes the oldest older files when its storage runs low. Delete removes a file for good."><svg class="icon"><use href="#i-info"/></svg></button></h2>
+            <span class="muted small" id="filessummary"></span>
+        </header>
+        <div id="loading-img" class="loading" role="status">
+            <span class="spinner" aria-hidden="true"></span><span id="loadpages">Loading the file list&hellip;</span>
+        </div>
+        <ul class="list filelist" id="filelist" hidden></ul>
+        <div class="empty" id="filesempty" hidden>No log files on the reader yet.</div>
+        <div class="logstorage" id="logstorage" hidden>
+            <div class="small"><span class="muted">Free storage:</span> <span id="logstoragetext"></span></div>
+            <div class="meter" id="logstoragemeter"><span id="logstoragebar"></span></div>
+        </div>
+    </section>
+</div>
+</template>

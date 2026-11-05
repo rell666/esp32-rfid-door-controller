@@ -1,0 +1,118 @@
+<template id="ntpcontent">
+<div class="set-page set-ntp">
+    <div class="pagehead">
+        <h1>Time</h1>
+        <p>The reader's clock, where it gets the time from and its time zone.</p>
+    </div>
+
+    <section class="card">
+        <h2>Device clock</h2>
+        <div class="set-clock">
+            <svg class="icon"><use href="#i-clock"/></svg>
+            <div class="set-clocktext">
+                <div id="device-time" class="set-clocknow" aria-live="off">Asking the reader...</div>
+                <div id="device-time-note" class="muted small"></div>
+            </div>
+        </div>
+        <p class="muted small">Without NTP (no Internet, for example on the reader's own hotspot) the reader loses the time at every power cut. Signing in sets it from this browser, or use the button below.</p>
+        <div class="actions">
+            <button type="button" data-onclick="syncBrowserTime" class="btn" id="synctimeb"><svg class="icon icon-sm"><use href="#i-clock"/></svg>Set from this browser</button>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Time sync (NTP)</h2>
+        <div class="grid2">
+            <div class="field">
+                <div class="labelrow"><label for="ntpserver" id="lbl-ntpserver">NTP Server</label><button type="button" class="help" aria-describedby="lbl-ntpserver" data-content="Where the reader gets the time from over the Internet. pool.ntp.org picks a server near you; your router may run one too." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                <input placeholder="pool.ntp.org" value="pool.ntp.org" id="ntpserver" type="text" maxlength="63" autocomplete="off" autocapitalize="off" spellcheck="false">
+            </div>
+            <div class="field">
+                <div class="labelrow"><label for="intervals" id="lbl-intervals">Sync interval (minutes)</label><button type="button" class="help" aria-describedby="lbl-intervals" data-content="Minutes between time syncs with the NTP server: 1 to 10080 (a week), 30 is the default, 0 leaves the firmware's own (every 3 hours). Takes effect after a restart." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                <input placeholder="30" value="30" id="intervals" type="number" inputmode="numeric" min="0" step="1">
+            </div>
+        </div>
+        <div class="field">
+            <div class="labelrow"><label for="DropDownTimezone" id="lbl-DropDownTimezone">Time Zone</label><button type="button" class="help" aria-describedby="lbl-DropDownTimezone" data-content="The reader's local time, with summer time where the zone has it. Opening hours, user validity dates and the logs use it." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+            <select name="DropDownTimezone" id="DropDownTimezone">
+                <option value="">Not set (UTC)</option>
+                <optgroup label="Asia">
+                    <option value="WIB-7">Asia/Jakarta</option>
+                    <option value="GMT+2">Asia/Jerusalem</option>
+                    <option value="SGT-8">Asia/Singapore</option>
+                    <option value="ULAT-8ULAST,M3.5.0/2,M9.5.0/2">Asia/Ulaanbaatar, Mongolia</option>
+                </optgroup>
+                <optgroup label="Atlantic">
+                    <option value="AST4ADT">Atlantic/Atlantic Time</option>
+                </optgroup>
+                <optgroup label="Australia">
+                    <option value="EST-10EDT-11,M10.5.0/02:00:00,M3.5.0/03:00:00">Australia/Melbourne, Canberra, Sydney</option>
+                    <option value="WST-8">Australia/Perth</option>
+                    <option value="EST-10">Australia/Brisbane</option>
+                    <option value="CST-9:30CDT-10:30,M10.5.0/02:00:00,M3.5.0/03:00:00">Australia/Adelaide</option>
+                    <option value="CST-9:30">Australia/Darwin</option>
+                </optgroup>
+                <optgroup label="Central and South America">
+                    <option value="BRST+3BRDT+2,M10.3.0,M2.3.0">Central and South America/Brazil, Sao Paulo</option>
+                    <option value="UTC+3">Central and South America/Argentina</option>
+                    <option value="CST+6">Central and South America/Central America</option>
+                </optgroup>
+                <optgroup label="Europe">
+                    <option value="CET-1CEST-2,M3.5.0/02:00:00,M10.5.0/03:00:00">Europe/Central</option>
+                    <option value="EET-2EEST-3,M3.5.0/03:00:00,M10.5.0/04:00:00">Europe/Eastern</option>
+                    <option value="GMT+0BST-1,M3.5.0/01:00:00,M10.5.0/02:00:00">Europe/London (UK, Ireland, Portugal)</option>
+                    <option value="EET-2EEST,M3.5.0/3,M10.5.0/4">Europe/Kyiv, Ukraine</option>
+                    <option value="MSK-3MSD,M3.5.0/2,M10.5.0/3">Europe/Moscow, Russia</option>
+                    <option value="MST-3MDT,M3.5.0/2,M10.5.0/3">Europe/St.Petersburg, Russia</option>
+                </optgroup>
+                <optgroup label="New Zealand">
+                    <option value="NZST-12NZDT-13,M9.4.0/02:00:00,M4.1.0/03:00:00">New Zealand/Auckland, Wellington</option>
+                </optgroup>
+                <optgroup label="USA &amp; Canada">
+                    <option value="HAW10">USA &amp; Canada/Hawaii Time</option>
+                    <option value="AKST9AKDT">USA &amp; Canada/Alaska Time</option>
+                    <option value="PST8PDT">USA &amp; Canada/Pacific Time</option>
+                    <option value="MST7MDT">USA &amp; Canada/Mountain Time</option>
+                    <option value="MST7">USA &amp; Canada/Mountain Time (Arizona, no DST)</option>
+                    <option value="CST6CDT">USA &amp; Canada/Central Time</option>
+                    <option value="EST5EDT">USA &amp; Canada/Eastern Time</option>
+                </optgroup>
+            </select>
+            <div class="hint" id="browsertz"></div>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Real-time clock (RTC)</h2>
+        <p class="muted small">A battery-backed clock module keeps the time through a power cut, so a reader without NTP knows the time as soon as it starts. Power the module from 3.3 V, never 5 V. Takes effect after a restart.</p>
+        <div class="field">
+            <div class="labelrow"><label for="rtctype" id="lbl-rtctype">RTC module</label><button type="button" class="help" aria-describedby="lbl-rtctype" data-content="A DS3231 (most accurate; a ZS-042 board charges its coin cell: fit an LIR2032, or remove its charging resistor) or a DS1307, on I2C address 0x68. The reader reads it once at start and sets it whenever the time comes from NTP or a browser." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+            <select id="rtctype" data-onchange="rtcTypeChanged">
+                <option value="0">None</option>
+                <option value="1">DS3231</option>
+                <option value="2">DS1307</option>
+            </select>
+        </div>
+        <div class="grid2" id="rtcpins" hidden>
+            <div class="field">
+                <div class="labelrow"><label for="rtcsdapin" id="lbl-rtcsdapin">RTC SDA pin</label><button type="button" class="help" aria-describedby="lbl-rtcsdapin" data-content="The GPIO wired to the module's SDA (data). GPIO 21 on the ESP32." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                <select id="rtcsdapin" data-pin-label="RTC SDA"></select>
+            </div>
+            <div class="field">
+                <div class="labelrow"><label for="rtcsclpin" id="lbl-rtcsclpin">RTC SCL pin</label><button type="button" class="help" aria-describedby="lbl-rtcsclpin" data-content="The GPIO wired to the module's SCL (clock). GPIO 22 on the ESP32." aria-label="Help"><svg class="icon"><use href="#i-info"/></svg></button></div>
+                <select id="rtcsclpin" data-pin-label="RTC SCL"></select>
+            </div>
+        </div>
+        <p class="muted small" id="rtcstatus" role="status"></p>
+        <div id="ntpproblem" class="banner danger" role="alert" hidden>
+            <svg class="icon"><use href="#i-alert"/></svg>
+            <div><strong>These settings cannot be saved yet.</strong> <span id="ntpproblemtext"></span></div>
+        </div>
+    </section>
+
+    <div class="actions set-save">
+        <p class="muted small">Save shows what changes for you to confirm; nothing is stored on the reader until you do.</p>
+        <button type="button" data-onclick="savePage" data-arg="ntp" class="btn primary">Save</button>
+    </div>
+</div>
+</template>

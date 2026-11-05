@@ -1,0 +1,13 @@
+# Ironframe partition table for the original ESP32 with 4 MB flash
+# (VOANZO / LC-Tech 2-relay board). Two 1.5 MB app slots for OTA with
+# rollback, ~900 KB LittleFS, and a core dump. otadata must stay at 0xe000:
+# the Arduino build writes boot_app0.bin there.
+# Changing this table needs a serial flash of bin/esp32wroom-full.bin and
+# erases LittleFS (users, settings, logs) and NVS.
+# Name,   Type, SubType,  Offset,   Size
+nvs,      data, nvs,      0x9000,   0x5000
+otadata,  data, ota,      0xe000,   0x2000
+app0,     app,  ota_0,    0x10000,  0x180000
+app1,     app,  ota_1,    0x190000, 0x180000
+spiffs,   data, spiffs,   0x310000, 0xE0000
+coredump, data, coredump, 0x3F0000, 0x10000

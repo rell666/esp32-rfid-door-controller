@@ -1,0 +1,71 @@
+/* Users page (users.htm / users.js): the user rows, the toolbar and the editor. */
+
+.uhead { display: flex; align-items: flex-start; gap: 12px; }
+.uhead > div { flex: 1; min-width: 0; }
+.uhead .btn { flex: none; }
+
+.scanhint { font-size: 14px; }
+.scanhint strong { color: #fff; }
+
+.ufilters { margin-bottom: 12px; }
+.ufilters select { font-size: 15px; }
+
+.ulistcard { overflow: hidden; }
+.ucount { padding: 10px var(--gap); font-size: 13px; color: var(--if-400); border-bottom: 1px solid rgba(51, 78, 104, 0.6); }
+
+/* one user: avatar, name, UID, then access / validity / PIN tags */
+.urow { align-items: flex-start; }
+.urow:focus-visible { outline-offset: -2px; }
+.urow .end { align-self: center; }
+.uavatar {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; border-radius: 50%;
+  background: var(--if-700); color: #fff; font-weight: 700; font-size: 15px; letter-spacing: 0.5px;
+}
+.uavatar.admin { background: var(--if-amber); color: var(--if-950); }
+.uavatar.off { background: var(--if-800); color: var(--if-400); }
+.utitle { display: flex; align-items: baseline; gap: 8px; }
+.uname { min-width: 0; overflow-wrap: anywhere; }
+.uuid { margin-top: 1px; letter-spacing: 0.3px; }
+.utags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.utags .badge { display: inline-flex; align-items: center; gap: 4px; }
+.icon-xs { width: 13px; height: 13px; }
+.urow.inactive .uname { color: var(--if-200); }
+.urow.removing { opacity: 0.55; cursor: progress; }
+.urow.flash { animation: uflash 2.2s ease-out; }
+@keyframes uflash { 0%, 35% { background: rgba(245, 158, 11, 0.22); } 100% { background: transparent; } }
+
+/* the empty list and "no users match" */
+#usersempty p { margin: 0 0 8px; }
+#usersempty .emptytitle { color: #fff; font-weight: 600; font-size: 17px; }
+#usersempty .emptyicon { width: 40px; height: 40px; color: var(--if-600); margin-bottom: 8px; }
+#usersempty .btn { margin-top: 4px; }
+
+#userpager { border-top: 1px solid rgba(51, 78, 104, 0.6); flex-wrap: wrap; }
+#userpager .btn { min-width: 44px; min-height: 44px; }
+#userpageinfo { min-width: 110px; text-align: center; }
+.icon.flip { transform: rotate(180deg); }
+
+/* the editor */
+#editor-modal label.reqd .ltext::after { content: "*"; color: var(--if-danger); font-weight: 600; margin-left: 4px; }
+#editor-modal .mono { letter-spacing: 0.5px; }
+#editor-modal .field > label.check { display: flex; margin: 6px 0 0; font-weight: 400; color: var(--if-100); }
+#editor-title:focus { outline: none; }
+#editor-title { overflow-wrap: anywhere; }
+.warnhint { color: var(--if-warning) !important; }
+.datehint { margin: -6px 0 16px; font-size: 13px; color: var(--if-400); }
+#datewarn { margin: -10px 0 16px; }
+#editornote { margin-bottom: 16px; }
+/* the device's answer: between the form and the buttons, never scrolled away */
+#editorerror { margin: 8px 20px 0; }
+/* head and buttons stay put, the form scrolls between them */
+#editor { display: flex; flex-direction: column; max-height: calc(100vh - 26px); max-height: calc(100dvh - 26px); }
+#editor .dlg-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+
+@media (max-width: 599px) {
+  .uhead .btn { padding: 0 14px; }
+  #editor-modal .dlg-foot .spacer { display: none; }
+}
+@media (min-width: 600px) {
+  .datehint { margin-top: -6px; }
+}
